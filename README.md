@@ -12,7 +12,9 @@ bash deploy/init-env.sh <public-host>
 
 Set `OPENROUTER_KEY` in the generated `.env`. The chat endpoint uses `openai/gpt-4.1-mini` and file indexing and search use `openai/text-embedding-3-small`, all through OpenRouter. With an empty key, LibreChat can accept a per-user OpenRouter key for chat, and file indexing requires the server-side key.
 
-If Nginx already listens on port 80, set `CADDY_HTTP_BIND=127.0.0.1:8080` in `.env`. Enable a separate Nginx virtual host using `deploy/nginx-http.conf.template` and replace `__PUBLIC_HOST__` with the same address as `PUBLIC_HOST`. Run `nginx -t` before reloading it. Nginx passes HTTP and ACME validation for this host to Caddy. Caddy serves HTTPS directly on port 443.
+Use `PUBLIC_HOST` for the canonical URL. When switching an IP-based deployment to a domain, set `PUBLIC_HOST` to the DNS name and `REDIRECT_IP` to the previous IPv4 address in `.env`. Old HTTP and HTTPS links redirect to the canonical domain with their path and query intact.
+
+If Nginx already listens on port 80, set `CADDY_HTTP_BIND=127.0.0.1:8080` in `.env`. Enable a separate Nginx virtual host using `deploy/nginx-http.conf.template` and replace `__PUBLIC_HOST__` with the value of `PUBLIC_HOST`. If `REDIRECT_IP` is set, include that address in `server_name` as well. Run `nginx -t` before reloading it. Nginx passes HTTP and ACME validation to Caddy, which serves HTTPS directly on port 443.
 
 ```sh
 docker compose up -d --build --wait

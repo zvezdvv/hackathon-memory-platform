@@ -13,6 +13,8 @@ services:
     image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     environment:
       PUBLIC_HOST: ${PUBLIC_HOST:?Set PUBLIC_HOST in .env}
+      HTTPS_HOSTS: 'https://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}${REDIRECT_IP:+, https://${REDIRECT_IP}}'
+      TLS_DEFAULT_SNI: ${REDIRECT_IP:-${PUBLIC_HOST:?Set PUBLIC_HOST in .env}}
     ports:
       - '${CADDY_HTTP_BIND:-80}:80'
       - '443:443'

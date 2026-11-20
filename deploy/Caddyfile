@@ -1,14 +1,21 @@
 {
-	default_sni {$PUBLIC_HOST}
+	default_sni {$TLS_DEFAULT_SNI}
+	auto_https disable_redirects
 	admin off
 }
 
-https://{$PUBLIC_HOST} {
+http:// {
+	redir https://{$PUBLIC_HOST}{uri} 308
+}
+
+{$HTTPS_HOSTS} {
 	tls {
 		issuer acme https://acme-v02.api.letsencrypt.org/directory {
 			profile shortlived
 		}
 	}
+	@alias not host {$PUBLIC_HOST}
+	redir @alias https://{$PUBLIC_HOST}{uri} 308
 	encode zstd gzip
 	reverse_proxy frontend:3080
 }
