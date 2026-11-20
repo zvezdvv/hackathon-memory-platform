@@ -1,0 +1,195 @@
+import React from 'react';
+import { KeyRound, PlugZap, X } from 'lucide-react';
+import { Button, Spinner, TooltipAnchor } from '@librechat/client';
+import type { MCPServerStatus } from 'librechat-data-provider';
+import type { MCPConnectionView } from '~/hooks/MCP/connection';
+import {
+  getMCPControlState,
+  getMCPDisplayStatus,
+  getMCPServerAction,
+  getMCPStatusColor,
+} from './mcpServerUtils';
+import { useLocalize } from '~/hooks';
+import { cn } from '~/utils';
+
+let localize: ReturnType<typeof useLocalize>;
+
+interface StatusIconProps {
+  serverName: string;
+  onConfigClick: (e: React.MouseEvent) => void;
+}
+
+interface InitializingStatusProps extends StatusIconProps {
+  onCancel: (e: React.MouseEvent) => void;
+  canCancel: boolean;
+}
+
+export interface MCPServerStatusIconProps {
+  serverName: string;
+  serverStatus?: MCPServerStatus;
+  view?: MCPConnectionView;
+  onConfigClick: (e: React.MouseEvent) => void;
+  isInitializing: boolean;
+  canCancel: boolean;
+  onCancel: (e: React.MouseEvent) => void;
+  hasCustomUserVars?: boolean;
+  /** When true, renders as a small status dot for compact layouts */
+  compact?: boolean;
+}
+
+/**
+ * Renders the appropriate status icon for an MCP server based on its state.
+ *
+ * Unified icon system:
+ * - PlugZap: making the connection (for disconnected servers)
+ * - KeyRound: the credentials the server asks this user for
+ * - Spinner: Loading state (during connection)
+ * - X: Cancel (during OAuth flow, shown on hover over spinner)
+ */
+export default function MCPServerStatusIcon(props: MCPServerStatusIconProps) {
+  const {
+    serverName,
+    serverStatus,
+    view,
+    onConfigClick,
+    isInitializing,
+    canCancel,
+    onCancel,
+    compact = false,
+  } = props;
+  localize = useLocalize();
+
+  if (compact) {
+    return (
+      <CompactStatusDot
+        serverStatus={getMCPDisplayStatus(serverStatus, view)}
+        isInitializing={isInitializing}
+      />
+    );
+  }
+
+  const action = getMCPServerAction(props);
+  if (isInitializing || action === 'cancel') {
+    return (
+      <LoadingStatusIcon
+        serverName={serverName}
+        onConfigClick={onConfigClick}
+        onCancel={onCancel}
+        canCancel={canCancel}
+      />
+    );
+  }
+  if (getMCPControlState(serverStatus, view) === 'connecting') {
+    return <ConnectingSpinner serverName={serverName} />;
+  }
+  if (action === 'configure') {
+    return <ConfigureButton serverName={serverName} onConfigClick={onConfigClick} />;
+  }
+  if (action === 'connect') {
+    return <ConnectButton serverName={serverName} onConfigClick={onConfigClick} />;
+  }
+  return null;
+}
+
+interface CompactStatusDotProps {
+  serverStatus?: MCPServerStatus;
+  isInitializing: boolean;
+}
+
+function CompactStatusDot({ serverStatus, isInitializing }: CompactStatusDotProps) {
+  if (isInitializing) {
+    return (
+      /** `status-info` rather than `-strong`: the strong slot is a neutral grey
+       *  in both standard palettes, so using it turned this blue dot grey. The
+       *  pulse takes the on-status ink so it inverts with the fill. */
+      <div className="border-surface-secondary bg-status-info flex size-3.5 items-center justify-center rounded-full border-2">
+        <div className="bg-text-on-status size-1.5 animate-pulse rounded-full" />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={cn(
+        'border-surface-secondary size-3 rounded-full border-2',
+        getMCPStatusColor(serverStatus),
+      )}
+    />
+  );
+}
+
+function LoadingStatusIcon({ serverName, onCancel, canCancel }: InitializingStatusProps) {
+  if (canCancel) {
+    return (
+      <TooltipAnchor
+        description={localize('com_ui_cancel')}
+        render={
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onCancel}
+            className="group hover:bg-status-error-subtle size-6 rounded p-1"
+            aria-label={localize('com_ui_cancel')}
+          >
+            <div className="relative size-4">
+              <Spinner tone="primary" className="size-4 group-hover:opacity-0" />
+              <X className="text-text-destructive absolute inset-0 size-4 opacity-0 group-hover:opacity-100" />
+            </div>
+          </Button>
+        }
+      />
+    );
+  }
+
+  return (
+    <div className="flex size-6 items-center justify-center rounded p-1">
+      <Spinner
+        tone="primary"
+        className="size-4"
+        aria-label={localize('com_nav_mcp_status_connecting', { 0: serverName })}
+      />
+    </div>
+  );
+}
+
+function ConnectingSpinner({ serverName }: { serverName: string }) {
+  return (
+    <div className="flex size-6 items-center justify-center rounded p-1">
+      <Spinner
+        tone="primary"
+        className="size-4"
+        aria-label={localize('com_nav_mcp_status_connecting', { 0: serverName })}
+      />
+    </div>
+  );
+}
+
+/** Connect button - shown for disconnected/error states. Uses PlugZap icon. */
+function ConnectButton({ serverName, onConfigClick }: StatusIconProps) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={onConfigClick}
+      className="hover:bg-surface-secondary size-6 rounded p-1"
+      aria-label={localize('com_nav_mcp_connect_server', { 0: serverName })}
+    >
+      <PlugZap className="text-text-secondary size-4" aria-hidden="true" />
+    </Button>
+  );
+}
+
+/** Configure button - shown for connected servers with custom vars. Uses KeyRound icon. */
+function ConfigureButton({ serverName, onConfigClick }: StatusIconProps) {
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={onConfigClick}
+      className="hover:bg-surface-secondary size-6 rounded p-1"
+      aria-label={localize('com_nav_mcp_configure_server', { 0: serverName })}
+    >
+      <KeyRound className="text-text-secondary size-4" aria-hidden="true" />
+    </Button>
+  );
+}

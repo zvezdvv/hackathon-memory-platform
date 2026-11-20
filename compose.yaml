@@ -1,0 +1,157 @@
+name: hackathon-memory-platform
+
+x-service: &service
+  restart: unless-stopped
+  logging:
+    options:
+      max-size: 10m
+      max-file: '3'
+
+services:
+  proxy:
+    <<: *service
+    image: caddy:2.11.9-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST:?Set PUBLIC_HOST in .env}
+    ports:
+      - '${CADDY_HTTP_BIND:-80}:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    depends_on:
+      frontend:
+        condition: service_healthy
+
+  frontend:
+    <<: *service
+    image: ghcr.io/librechat-ai/librechat-dev:4700c44eb77c142b4f9f8b87476924f22890eb39@sha256:07e5b907dcf9b50eed1b791ff5b74b5311ba13dfe15b1f2a76f39755328e22ff
+    environment:
+      HOST: 0.0.0.0
+      PORT: '3080'
+      DOMAIN_CLIENT: https://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}
+      DOMAIN_SERVER: https://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}
+      TRUST_PROXY: '1'
+      NO_INDEX: 'true'
+      ALLOW_EMAIL_LOGIN: 'true'
+      ALLOW_REGISTRATION: 'false'
+      ALLOW_SOCIAL_LOGIN: 'false'
+      SCHEDULES_SINGLE_PROCESS: 'true'
+      ENDPOINTS: agents,custom
+      OPENROUTER_KEY: ${OPENROUTER_KEY:-user_provided}
+      JWT_SECRET: ${JWT_SECRET:?Run deploy/init-env.sh}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Run deploy/init-env.sh}
+      CREDS_KEY: ${CREDS_KEY:?Run deploy/init-env.sh}
+      CREDS_IV: ${CREDS_IV:?Run deploy/init-env.sh}
+      MONGO_URI: mongodb://librechat:${MONGO_PASSWORD:?Run deploy/init-env.sh}@mongodb:27017/LibreChat?authSource=admin
+      SEARCH: 'true'
+      MEILI_HOST: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?Run deploy/init-env.sh}
+      RAG_API_URL: http://backend:8000
+      RAG_PORT: '8000'
+      LIBRECHAT_TEMP_CREDENTIALS_PATH: /app/data/.env.temp
+    volumes:
+      - ./deploy/librechat.yaml:/app/librechat.yaml:ro
+      - chat-data:/app/data
+      - chat-images:/app/client/public/images
+      - chat-uploads:/app/uploads
+    networks: [edge, app]
+    depends_on:
+      backend:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+      meilisearch:
+        condition: service_started
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3080/health').then(res => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 24
+
+  backend:
+    <<: *service
+    image: hackathon-memory-platform-rag:97633ad
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.lite
+    environment:
+      DB_HOST: vectordb
+      POSTGRES_DB: rag
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run deploy/init-env.sh}
+      JWT_SECRET: ${JWT_SECRET:?Run deploy/init-env.sh}
+      EMBEDDINGS_PROVIDER: openai
+      EMBEDDINGS_MODEL: openai/text-embedding-3-small
+      RAG_OPENAI_BASEURL: https://openrouter.ai/api/v1
+      RAG_OPENAI_API_KEY: ${OPENROUTER_KEY:-not-configured}
+      RAG_CHECK_EMBEDDING_CTX_LENGTH: 'false'
+    networks: [app, vectors]
+    depends_on:
+      vectordb:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import json, urllib.request; assert json.load(urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2))['status'] == 'UP'"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+
+  mongodb:
+    <<: *service
+    image: mongo:8.0.20
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: librechat
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?Run deploy/init-env.sh}
+    volumes:
+      - mongo-data:/data/db
+    networks: [app]
+    healthcheck:
+      test: [CMD, mongosh, --quiet, --host, mongodb, --eval, "quit(db.adminCommand({ping: 1}).ok === 1 ? 0 : 1)"]
+      interval: 5s
+      timeout: 4s
+      retries: 24
+
+  meilisearch:
+    <<: *service
+    image: getmeili/meilisearch:v1.35.1
+    environment:
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: 'true'
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?Run deploy/init-env.sh}
+    volumes:
+      - meili-data:/meili_data
+    networks: [app]
+
+  vectordb:
+    <<: *service
+    image: pgvector/pgvector:pg16@sha256:484e838076e04939d27d3e176e91c86eea96236126023be8d3059761122e579f
+    environment:
+      POSTGRES_DB: rag
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run deploy/init-env.sh}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks: [vectors]
+    healthcheck:
+      test: [CMD, pg_isready, -h, localhost, -U, rag, -d, rag]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+networks:
+  edge:
+  app:
+  vectors:
+    internal: true
+
+volumes:
+  caddy-data:
+  caddy-config:
+  chat-data:
+  chat-images:
+  chat-uploads:
+  mongo-data:
+  meili-data:
+  pg-data:

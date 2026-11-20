@@ -1,0 +1,50 @@
+version: 1.3.19
+cache: true
+
+interface:
+  customWelcome: 'Willkommen beim Smart-City-Assistenten'
+  landingHeading: greeting
+  modelSelect: true
+  fileSearch: true
+  fileCitations: true
+  parameters: false
+  presets: false
+  prompts:
+    use: false
+    create: false
+  bookmarks: false
+  memories: false
+  multiConvo: false
+  sideChat: false
+  sessionRail: false
+  sessionRailAutoOpen: false
+  agents:
+    use: false
+    create: false
+  mcpServers:
+    use: false
+    create: false
+  skills: false
+  runCode: false
+  webSearch: false
+  mascot: false
+  marketplace:
+    use: false
+  feedback: false
+  analyticsConsent: false
+
+registration:
+  socialLogins: []
+
+endpoints:
+  custom:
+    - name: OpenRouter
+      apiKey: '${OPENROUTER_KEY}'
+      baseURL: https://openrouter.ai/api/v1
+      models:
+        default: [openai/gpt-4.1-mini]
+        fetch: false
+      titleConvo: true
+      titleModel: openai/gpt-4.1-mini
+      dropParams: [stop]
+      modelDisplayLabel: OpenRouter
