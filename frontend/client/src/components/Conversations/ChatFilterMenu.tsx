@@ -793,6 +793,9 @@ const ChatFilterMenu = () => {
   const setStatus = useSetAtom(setChatFilterStatusAtom);
   const setSort = useSetAtom(chatSortAtom);
   const [showProjectChats, setShowProjectChats] = useAtom(showProjectChatsAtom);
+  const { data: startupConfig } = useGetStartupConfig();
+  const interfaceConfig = startupConfig?.interface;
+  const showProjects = interfaceConfig != null && interfaceConfig.sidebarProjects !== false;
   const resetFilters = useSetAtom(resetChatFiltersAtom);
   const resetAllFacets = useSetAtom(resetFacetsAtom);
 
@@ -840,7 +843,7 @@ const ChatFilterMenu = () => {
       ? localize('com_ui_none')
       : localize('com_ui_active_count', { count: narrowingCount });
 
-  const totalCount = activeCount + facetCount;
+  const totalCount = activeCount + facetCount - (!showProjects && showProjectChats ? 1 : 0);
 
   /** The header's Reset undoes the whole menu, sort and view included; the one inside
    *  Filter clears only what that submenu owns. */
@@ -988,7 +991,7 @@ const ChatFilterMenu = () => {
         </PropertyRow>
 
         {/* The archive and search already list every chat, project or not. */}
-        {status === 'active' && (
+        {showProjects && status === 'active' && (
           <>
             <Ariakit.MenuSeparator className="border-border-medium my-1 h-px" />
             <Toggle

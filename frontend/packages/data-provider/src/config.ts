@@ -3502,6 +3502,8 @@ export const interfaceSchema = z
      *  false for a deployment where every chat uses the same one and the icon only adds noise. A
      *  running or unread status still shows on the row. */
     conversationIcons: z.boolean().optional(),
+    /** Shows project navigation and controls in the chat history sidebar. Defaults to true. */
+    sidebarProjects: z.boolean().optional(),
     mcpServers: mcpServersSchema.optional(),
     modelSelect: z.boolean().optional(),
     /** Set to false during a rolling upgrade, until every API replica supports title ownership and old title jobs drain. */

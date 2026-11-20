@@ -32,6 +32,7 @@ import {
   X,
 } from 'lucide-react';
 import { getTokenHeader } from 'librechat-data-provider';
+import { DEFAULT_PANEL, useActivePanel } from '~/Providers';
 import { cn } from '~/utils';
 
 /* ------------------------------------------------------------------ API */
@@ -568,7 +569,9 @@ function Chip({
   );
 }
 
-function MemoryOverlay({ onClose }: { onClose: () => void }) {
+export default function KnowledgePanel() {
+  const { setActive } = useActivePanel();
+  const onClose = useCallback(() => setActive(DEFAULT_PANEL), [setActive]);
   const [docs, setDocs] = useState<Doc[] | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -607,10 +610,12 @@ function MemoryOverlay({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !dialog) onClose();
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      if (!dialog) onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose, dialog]);
 
   // The embedded viewer asks for the login token when saving
@@ -799,6 +804,9 @@ function MemoryOverlay({ onClose }: { onClose: () => void }) {
 
   return createPortal(
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="memory-overlay-title"
       className="fixed inset-0 z-[150] flex flex-col bg-surface-primary"
       onDragOver={(e) => {
         e.preventDefault();
@@ -824,7 +832,9 @@ function MemoryOverlay({ onClose }: { onClose: () => void }) {
           <PanelLeft className="size-5" />
         </button>
         <div className="mr-2">
-          <h1 className="text-base font-semibold text-text-primary">Memory</h1>
+          <h1 id="memory-overlay-title" className="text-base font-semibold text-text-primary">
+            Memory
+          </h1>
           <p className="text-xs text-text-secondary">
             {docs ? `${stats.total} documents · ${stats.indexed} indexed in RAG` : 'loading …'}
           </p>
@@ -1043,24 +1053,5 @@ function MemoryOverlay({ onClose }: { onClose: () => void }) {
       {dialog === 'interview' && <InterviewDialog onClose={() => setDialog(null)} />}
     </div>,
     document.body,
-  );
-}
-
-/* ------------------------------------------------------------------ Sidebar */
-
-/** The Memory tab opens the full-screen overlay; the sidebar only shows an entry point. */
-export default function KnowledgePanel() {
-  const [open, setOpen] = useState(true);
-  return (
-    <div className="flex h-full flex-col gap-3 px-3 py-2">
-      <h2 className="text-sm font-semibold text-text-primary">Memory</h2>
-      <p className="text-xs text-text-secondary">
-        The administration's memory: all documents, voice notes and interviews with metadata, search and sources.
-      </p>
-      <button type="button" className={primaryCls} onClick={() => setOpen(true)}>
-        <Maximize2 className="size-4" /> Open Memory
-      </button>
-      {open && <MemoryOverlay onClose={() => setOpen(false)} />}
-    </div>
   );
 }

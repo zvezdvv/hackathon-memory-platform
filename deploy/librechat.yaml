@@ -5,6 +5,7 @@ interface:
   customWelcome: 'Welcome to the Smart City Assistant'
   landingHeading: greeting
   modelSelect: true
+  sidebarProjects: false
   fileSearch: true
   fileCitations: true
   parameters: false

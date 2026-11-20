@@ -77,6 +77,7 @@ interface ConversationsProps {
   setIsChatsExpanded: (expanded: boolean) => void;
   /** Actions for the Chats header, alongside the Projects header's own. */
   chatsHeaderTrailing?: ReactNode;
+  showProjectBadge?: boolean;
   /** Whether another page exists, so an empty list can be told apart from an unpaged one. */
   hasNextPage?: boolean;
   /** Whether the initial conversations request failed without usable rows. */
@@ -228,6 +229,7 @@ const Conversations: FC<ConversationsProps> = ({
   isChatsExpanded,
   setIsChatsExpanded,
   chatsHeaderTrailing,
+  showProjectBadge = true,
   hasNextPage = false,
   isError = false,
   onRetry,
@@ -547,7 +549,7 @@ const Conversations: FC<ConversationsProps> = ({
               retainView={moveToTop}
               toggleNav={toggleNav}
               isGenerating={isGenerating}
-              showProjectBadge
+              showProjectBadge={showProjectBadge}
               draggable
             />
           </MeasuredRow>
@@ -556,7 +558,7 @@ const Conversations: FC<ConversationsProps> = ({
 
       return null;
     },
-    [cache, flattenedItems, moveToTop, toggleNav, activeJobIds, sort.field],
+    [cache, flattenedItems, moveToTop, toggleNav, activeJobIds, sort.field, showProjectBadge],
   );
 
   const getRowHeight = useCallback(
