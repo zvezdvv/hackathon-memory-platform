@@ -71,7 +71,7 @@ modelSpecs:
       mcpServers: ['knowledge']
       preset:
         endpoint: 'OpenRouter'
-        model: 'openai/gpt-4.1-mini'
+        model: 'openai/gpt-6-luna'
         promptPrefix: |
           You are the Smart City Assistant of a city administration (the memory of the
           administration). Answer in the language of the user's question (default: English),
@@ -95,7 +95,7 @@ modelSpecs:
       mcpServers: ['knowledge']
       preset:
         endpoint: 'OpenRouter'
-        model: 'openai/gpt-4.1-mini'
+        model: 'openai/gpt-6-luna'
         promptPrefix: |
           You run a knowledge interview to secure a person's experience-based knowledge for
           their successor. The first message names the person, topic and guide.

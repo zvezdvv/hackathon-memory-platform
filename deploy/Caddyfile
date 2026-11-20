@@ -18,11 +18,11 @@ http:// {
 	redir @alias https://{$PUBLIC_HOST}{uri} 308
 	encode zstd gzip
 
-	# MCP ist nur intern für LibreChat gedacht
+	# MCP is internal to LibreChat only
 	handle /knowledge/mcp* {
 		respond 404
 	}
-	# Wissensspeicher (Memory-Tab, Viewer, Quellenlinks)
+	# Knowledge base (Memory overlay, viewer, source links)
 	handle_path /knowledge/* {
 		reverse_proxy knowledge:8100
 	}

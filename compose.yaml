@@ -91,7 +91,7 @@ services:
       PUBLIC_URL: https://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}/knowledge
       JWT_SECRET: ${JWT_SECRET:?Run deploy/init-env.sh}
       # Keep in sync with the backend's embedding model/collection; a change triggers re-embedding
-      INDEX_VERSION: openai/text-embedding-3-small
+      INDEX_VERSION: smartcity-voyage-4
     volumes:
       - ./knowledge:/data/knowledge
     networks: [edge, app]
