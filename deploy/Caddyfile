@@ -10,5 +10,16 @@ https://{$PUBLIC_HOST} {
 		}
 	}
 	encode zstd gzip
-	reverse_proxy frontend:3080
+
+	# MCP ist nur intern für LibreChat gedacht
+	handle /knowledge/mcp* {
+		respond 404
+	}
+	# Wissensspeicher (Memory-Tab, Viewer, Quellenlinks)
+	handle_path /knowledge/* {
+		reverse_proxy knowledge:8100
+	}
+	handle {
+		reverse_proxy frontend:3080
+	}
 }

@@ -31,3 +31,23 @@ Upload a small text file using **Upload for File Search**, then ask a question t
 docker compose ps
 docker compose logs --tail 80 frontend backend proxy
 ```
+
+## Memory (knowledge base)
+
+The **Memory** tab in the LibreChat sidebar opens a full-screen overlay over `knowledge/` with metadata, filters, sorting, grouping and a reading pane (code in `frontend/client/src/components/SidePanel/Knowledge/KnowledgePanel.tsx`, server in `knowledge-server/`). That is why the `frontend` service now builds from `frontend/` instead of using the official image.
+
+| Folder | Content |
+|---|---|
+| `knowledge/files/` | Documents (laws, PDFs, notes) – upload in the tab or copy into the folder |
+| `knowledge/speech/` | Voice notes (transcripts) |
+| `knowledge/interviews/<person>/` | Interview protocols |
+| `knowledge/_guides/` | Markdown guides that tell the interview assistant how to ask |
+
+Every file in `knowledge/` is indexed automatically through the RAG API (green dot = embedded, yellow = keyword search only, e.g. while `OPENROUTER_KEY` is empty). Chat answers link their sources to `https://<public-host>/knowledge/view?…`, which opens the document with the passage highlighted.
+
+The `knowledge` service also exposes an MCP server that LibreChat uses internally (`http://knowledge:8100/mcp/`, blocked at the proxy). Two assistants in the model selector use it: **Smart City Assistant** (answers with inline source links) and **Knowledge Interview** (asks targeted questions and saves the protocol). Uploads, edits and deletions require a LibreChat login.
+
+```sh
+docker compose up -d --build knowledge   # after changes to knowledge-server/
+docker compose up -d --build frontend    # after changes to the Memory tab
+```

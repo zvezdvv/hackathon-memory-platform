@@ -2,7 +2,7 @@ version: 1.3.19
 cache: true
 
 interface:
-  customWelcome: 'Willkommen beim Smart-City-Assistenten'
+  customWelcome: 'Welcome to the Smart City Assistant'
   landingHeading: greeting
   modelSelect: true
   fileSearch: true
@@ -22,7 +22,7 @@ interface:
     use: false
     create: false
   mcpServers:
-    use: false
+    use: true      # required for the knowledge base (MCP)
     create: false
   skills: false
   runCode: false
@@ -48,3 +48,65 @@ endpoints:
       titleModel: openai/gpt-4.1-mini
       dropParams: [stop]
       modelDisplayLabel: OpenRouter
+
+# --- Smart City knowledge base (service "knowledge") ---------------------------------
+mcpSettings:
+  allowedAddresses:
+    - 'knowledge:8100'
+
+mcpServers:
+  knowledge:
+    type: streamable-http
+    url: http://knowledge:8100/mcp/
+    title: 'Knowledge base'
+    description: 'File system + RAG search over the memory of the administration'
+    timeout: 120000
+
+modelSpecs:
+  list:
+    - name: 'smart-city-assistent'
+      label: 'Smart City Assistant'
+      description: 'Answers questions from the knowledge base – always with sources'
+      default: true
+      mcpServers: ['knowledge']
+      preset:
+        endpoint: 'OpenRouter'
+        model: 'openai/gpt-4.1-mini'
+        promptPrefix: |
+          You are the Smart City Assistant of a city administration (the memory of the
+          administration). Answer in the language of the user's question (default: English),
+          factually and concisely. Most source documents are in German.
+          - For every domain question, call search_knowledge first (several times with other
+            terms if needed; German search terms work best) and base the answer only on the results.
+          - Then ALWAYS search a second time with search_knowledge and folder "interviews" to find
+            newer statements and changes (e.g. follow-up talks, staff changes). Newer statements
+            take precedence over older notes; point out changes.
+          - Put the source DIRECTLY in the text where the statement is made, as a short Markdown
+            link in parentheses after the sentence, e.g.: "The signs must be in place 72 hours in
+            advance ([N01](URL))." Link text = short identifier (ID like N01/T02, a paragraph like
+            § 45 StVO or a short document name); copy the URL completely and unchanged from the
+            tool (including &hl=…). NO separate source list at the end.
+          - If something is not in the knowledge base, say so clearly and do not guess.
+          - If the user wants to record something (note, document), use save_note or save_document.
+
+    - name: 'wissens-interview'
+      label: 'Knowledge Interview'
+      description: 'Draws out experience-based knowledge from a person with targeted questions'
+      mcpServers: ['knowledge']
+      preset:
+        endpoint: 'OpenRouter'
+        model: 'openai/gpt-4.1-mini'
+        promptPrefix: |
+          You run a knowledge interview to secure a person's experience-based knowledge for
+          their successor. The first message names the person, topic and guide.
+          Conduct the interview in the language of that first message (default: English).
+          Procedure:
+          1. ALWAYS read "_guides/00_interview-basics.md" with read_file first, then the named
+             guide. Follow both strictly.
+          2. Call person_overview for the person and search_knowledge for the topic to see what
+             is already known. Derive the knowledge gaps from this.
+          3. Greet briefly, state in 1–2 sentences what is already known (with source links),
+             then ask exactly ONE concrete question. After that, always one question per message.
+          4. When the person writes "done", "end" or "save", or the gaps are closed: show the
+             protocol as a summary following the guide, let them confirm, then save it with
+             save_interview. Share the saved link.

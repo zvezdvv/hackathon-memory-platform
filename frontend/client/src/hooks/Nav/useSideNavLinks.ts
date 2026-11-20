@@ -45,7 +45,8 @@ const SchedulePanel = lazyWithRecovery(
   () => import('~/components/SidePanel/Schedules/SchedulePanel'),
 );
 const Parameters = lazyWithRecovery(() => import('~/components/SidePanel/Parameters/Panel'));
-const MemoryPanel = lazyWithRecovery(() => import('~/components/SidePanel/Memories/MemoryPanel'));
+// Smart City: Memory-Tab = Wissens-Dateisystem (ersetzt das eingebaute Memories-Panel)
+const MemoryPanel = lazyWithRecovery(() => import('~/components/SidePanel/Knowledge/KnowledgePanel'));
 
 export default function useSideNavLinks({
   hidePanel,
@@ -186,7 +187,7 @@ export default function useSideNavLinks({
       });
     }
 
-    if (hasAccessToMemories && hasAccessToReadMemories) {
+    {
       links.push({
         title: 'com_ui_memories',
         label: '',

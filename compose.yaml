@@ -27,7 +27,11 @@ services:
 
   frontend:
     <<: *service
-    image: ghcr.io/librechat-ai/librechat-dev:4700c44eb77c142b4f9f8b87476924f22890eb39@sha256:07e5b907dcf9b50eed1b791ff5b74b5311ba13dfe15b1f2a76f39755328e22ff
+    # Eigenes Image aus frontend/ (Memory-Tab = Wissens-Dateisystem)
+    image: hackathon-memory-platform-frontend:local
+    build:
+      context: ./frontend
+      target: node
     environment:
       HOST: 0.0.0.0
       PORT: '3080'
@@ -65,10 +69,37 @@ services:
         condition: service_healthy
       meilisearch:
         condition: service_started
+      knowledge:
+        condition: service_healthy
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:3080/health').then(res => process.exit(res.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 5s
       timeout: 4s
+      retries: 24
+
+  # Wissensspeicher: Dateisystem (./knowledge) + automatischer RAG-Index + MCP-Server
+  knowledge:
+    <<: *service
+    image: hackathon-memory-platform-knowledge:local
+    build:
+      context: ./knowledge-server
+    environment:
+      KNOWLEDGE_ROOT: /data/knowledge
+      RAG_API_URL: http://backend:8000
+      PUBLIC_URL: https://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}/knowledge
+      JWT_SECRET: ${JWT_SECRET:?Run deploy/init-env.sh}
+      # Keep in sync with the backend's embedding model/collection; a change triggers re-embedding
+      INDEX_VERSION: openai/text-embedding-3-small
+    volumes:
+      - ./knowledge:/data/knowledge
+    networks: [edge, app]
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health', timeout=2)"]
+      interval: 5s
+      timeout: 3s
       retries: 24
 
   backend:
