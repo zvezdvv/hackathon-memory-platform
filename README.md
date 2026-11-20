@@ -42,7 +42,7 @@ The **Memory** tab opens the document workspace beside the LibreChat sidebar. It
 |---|---|
 | `knowledge/files/` | Documents (laws, PDFs, notes) – upload in the tab or copy into the folder |
 | `knowledge/speech/` | Voice notes (transcripts) |
-| `knowledge/interviews/<person>/` | Interview protocols |
+| `knowledge/interviews/<topic>/` | Interview protocols, filed by topic (person is metadata) |
 | `knowledge/_guides/` | Markdown guides that tell the interview assistant how to ask |
 
 Memory accepts PDF (up to 10 pages), Markdown and TXT. Active documents are indexed automatically. Each PDF page is rendered and sent as an image to GPT-6.1 Terra via OpenRouter. The RAG API embeds the transcript. Not Active and Draft documents stay in the list and are excluded from search. Chat citations open the document with the passage highlighted.

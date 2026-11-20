@@ -53,6 +53,13 @@ UPLOAD_EXT = EDITABLE_EXT | {".pdf"}
 DocumentStatus = Literal["active", "inactive", "draft"]
 DOCUMENT_STATUSES = {"active", "inactive", "draft"}
 GUIDE_FOLDER = "_guides"
+# Interview sessions build on each other: 1 workday walkthrough, 2 incidents, 3 plan vs. reality, 4+ deep dive
+SESSION_GUIDES = {
+    1: "_guides/01_workday-walkthrough.md",
+    2: "_guides/02_exceptions-and-incidents.md",
+    3: "_guides/03_plan-vs-reality.md",
+    4: "_guides/04_deep-dive.md",
+}
 
 STOPWORDS = set(
     "der die das und oder ein eine einer eines einem einen ist sind war wer wie was wo wann "
@@ -162,6 +169,22 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
             meta[last] = (meta[last] + " " + line.strip()[2:].strip('"')).strip()
     body = text[end + 4 :].lstrip("\n")
     return meta, body
+
+
+def section_items(body: str, headings: tuple[str, ...], limit: int = 8) -> list[str]:
+    """Bullet points of the first Markdown section whose heading starts with one of `headings`."""
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("## ") and line[3:].strip().lower().startswith(headings):
+            items = []
+            for item in lines[i + 1:]:
+                if item.startswith("## "):
+                    break
+                text = item.strip()
+                if text.startswith(("- ", "* ")):
+                    items.append(text[2:].strip())
+            return items[:limit]
+    return []
 
 
 def search_body(body: str) -> str:
@@ -518,20 +541,63 @@ class KnowledgeStore:
             counts[status] = counts.get(status, 0) + 1
         return {"files": len(self.entries), "counts": counts, "rag_ok": self.rag_ok, "rag_error": self.rag_error}
 
-    def people(self) -> list[dict]:
-        base = ROOT / "interviews"
+    def interview_person(self, path: str) -> str:
+        """Person of an interview file, read from its metadata (folders are topics, not people)."""
+        try:
+            meta, _ = split_frontmatter(self.get_text(path))
+        except Exception:  # noqa: BLE001
+            return ""
+        person = meta.get("person") or ""
+        if not person and meta.get("teilnehmende"):
+            person = meta["teilnehmende"].strip("[]").split("(")[0].strip().strip('"')
+        return person.strip()
+
+    def interview_sessions(self, person: str) -> list[dict]:
+        """Active interview sessions of a person, oldest first, with their session number."""
+        slug = slugify(person)
         out = []
-        for d in sorted(base.iterdir()) if base.exists() else []:
-            if d.is_dir() and not d.name.startswith("."):
-                files = sorted(f for f in d.iterdir() if f.is_file())
-                name = d.name.replace("-", " ").title()
-                for f in files:
-                    meta, _ = split_frontmatter(self.get_text(rel(f)))
-                    if meta.get("person"):
-                        name = meta["person"]
-                        break
-                out.append({"slug": d.name, "name": name, "sessions": len(files), "path": rel(d)})
-        return out
+        for path in sorted(self.entries):
+            # Drafts and inactive protocols still count as completed sessions
+            if not path.startswith("interviews/") or not (ROOT / path).is_file():
+                continue
+            if slugify(self.interview_person(path)) != slug:
+                continue
+            meta, body = split_frontmatter(self.get_text(path))
+            try:
+                number = int(meta.get("session") or 0)
+            except ValueError:
+                number = 0
+            out.append(
+                {
+                    "path": path,
+                    "session": number,
+                    "date": meta.get("date") or meta.get("datum", ""),
+                    "topic": meta.get("topic") or meta.get("thema") or meta.get("title") or meta.get("titel") or "",
+                    "open_points": section_items(body, ("offene punkte", "open points")),
+                    "deviations": section_items(body, ("abweichungen", "deviations")),
+                }
+            )
+        return sorted(out, key=lambda s: (s["date"], s["path"]))
+
+    def next_session(self, person: str) -> tuple[int, str]:
+        """Which interview session comes next for a person, and its guide (sessions 1–3, then 4+)."""
+        done = max((s["session"] for s in self.interview_sessions(person)), default=0)
+        number = done + 1
+        return number, SESSION_GUIDES[min(number, len(SESSION_GUIDES))]
+
+    def people(self) -> list[dict]:
+        sessions: dict[str, dict] = {}
+        for path in sorted(self.entries):
+            if not path.startswith("interviews/") or Path(path).suffix.lower() not in (".md", ".markdown"):
+                continue
+            name = self.interview_person(path)
+            if not name:
+                continue
+            slug = slugify(name)
+            entry = sessions.setdefault(slug, {"slug": slug, "name": name, "sessions": 0, "paths": []})
+            entry["sessions"] += 1
+            entry["paths"].append(path)
+        return list(sessions.values())
 
     def guides(self) -> list[dict]:
         base = ROOT / GUIDE_FOLDER
@@ -589,8 +655,6 @@ class KnowledgeStore:
                 person, rolle = person.strip(), rolle.rstrip(") ").strip()
             if not person and meta.get("teilnehmende"):
                 person = meta["teilnehmende"].split("(")[0].strip().strip('"')
-            if not person and top == "interviews" and "/" in path[len("interviews/"):]:
-                person = path.split("/")[1].replace("-", " ").title()
             datum = next(
                 (
                     v[:10]
@@ -918,6 +982,7 @@ class KnowledgeStore:
             "people": people,
             "places": [p for p in st.get("places", []) if isinstance(p, str)],
             "tags": [t for t in st.get("tags", []) if isinstance(t, str)],
+            "topic": st.get("topic") or "",
             "refers_to_date": st.get("date") or "",
             "updates": [u for u in st.get("updates", []) if isinstance(u, str)],
             "audio": audio,
@@ -937,7 +1002,15 @@ class KnowledgeStore:
         quoted = "\n".join(f"> {ln}" if ln.strip() else ">" for ln in transcript.strip().splitlines())
         lines += [f"## {labels.get('transcript') or 'Original transcript'}", quoted, ""]
         body = frontmatter(meta) + "\n".join(lines)
-        return self.write_text(f"speech/{today()}_{slugify(title)}.md", body, document_status=document_status)
+        # One topic level only: speech/<topic>/… (topic chosen by the LLM, existing folders reused)
+        topic = slugify(st.get("topic") or "") if st.get("topic") else ""
+        folder = f"speech/{topic}" if topic and topic != "untitled" else "speech"
+        return self.write_text(f"{folder}/{today()}_{slugify(title)}.md", body, document_status=document_status)
+
+    def topic_folders(self, top: str) -> list[str]:
+        """Names of the existing topic folders directly under a top-level folder."""
+        base = ROOT / top
+        return sorted(d.name for d in base.iterdir() if d.is_dir() and not d.name.startswith(".")) if base.exists() else []
 
     def save_audio(self, filename: str, data: bytes) -> str:
         AUDIO_DIR.mkdir(parents=True, exist_ok=True)
@@ -955,6 +1028,7 @@ class KnowledgeStore:
         places: list[str] | None = None,
         tags: list[str] | None = None,
         document_status: DocumentStatus = "active",
+        session: int = 0,
     ) -> str:
         rules = len(re.findall(r"\*\*(?:RULE|REGEL)[:\*]", content, re.I))
         meta = {
@@ -968,13 +1042,15 @@ class KnowledgeStore:
             "places": [p for p in (places or []) if isinstance(p, str) and p.strip()],
             "tags": [t for t in (tags or []) if isinstance(t, str) and t.strip()],
             "rules": str(rules) if rules else "",
+            "session": str(session) if session else "",
         }
         body = content.strip()
         if body.startswith("---"):
             _, body = split_frontmatter(body)
         if not body.lstrip().startswith("#"):
             body = f"# {meta['title']}\n\n{body}"
-        relpath = f"interviews/{slugify(person)}/{today()}_{slugify(topic)}.md"
+        # Interviews are filed by topic; the person is metadata (filterable in Memory).
+        relpath = f"interviews/{slugify(topic)}/{today()}_{slugify(person)}.md"
         return self.write_text(relpath, frontmatter(meta) + body + "\n", document_status=document_status)
 
 

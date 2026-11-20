@@ -13,7 +13,7 @@ INSTRUCTIONS = """Smart City knowledge base (file system + RAG search).
 Folders:
 - files/                 uploaded documents (PDFs, laws, notes, data)
 - speech/                voice notes (transcripts)
-- interviews/<person>/   knowledge interview protocols
+- interviews/<topic>/    knowledge interview protocols (person in the metadata)
 - _guides/               instructions on HOW to run interviews (not domain knowledge)
 
 Most source documents are written in German; answer in the user's language.
@@ -67,7 +67,7 @@ async def search_knowledge(query: str, folder: str = "", max_results: int = SEAR
 
     Args:
         query: Question or search terms in natural language (German terms work best).
-        folder: Optionally search only in this folder, e.g. "interviews/klaus-behrens" or "files".
+        folder: Optionally search only in this folder, e.g. "interviews" or "files/notizen".
         max_results: Number of reranked passages to return (1-6).
     """
     res = await store.search(
@@ -143,22 +143,34 @@ async def list_interview_guides() -> str:
 
 @mcp.tool()
 async def person_overview(person: str) -> str:
-    """Summarizes what the knowledge base already holds about a person.
+    """Summarizes what the knowledge base already holds about a person for an interview.
 
-    Returns previous interview sessions (with topics) and other mentions, so an interview
-    can focus on the knowledge gaps.
+    Returns previous interview sessions (with session numbers and topics), which session and
+    guide come NEXT, and other mentions of the person.
     """
-    slug = slugify(person)
-    sessions = []
-    for p in sorted(store.entries):
-        if p.startswith(f"interviews/{slug}/") and store.is_active(p):
-            meta, _ = split_frontmatter(store.get_text(p))
-            topic = meta.get("topic") or meta.get("thema") or meta.get("title") or meta.get("titel") or ""
-            date = meta.get("date") or meta.get("datum", "")
-            sessions.append(f"- [{p}]({view_url(p)}) – {date} – {topic}".rstrip())
+    sessions = store.interview_sessions(person)
+    number, guide = store.next_session(person)
+    out = [
+        f"NEXT INTERVIEW SESSION: {number} – use guide {guide} (read it with read_file).",
+        "",
+        f"Previous interview sessions with {person}: {len([s for s in sessions if s['session']])}",
+    ]
+    numbered = [s for s in sessions if s["session"]]
+    for s in numbered:
+        out.append(f"- Session {s['session']}: [{s['path']}]({view_url(s['path'])}) – {s['date']} – {s['topic']}")
+    if not numbered:
+        out.append("- none yet")
+    open_points = [p for s in numbered for p in s["open_points"]]
+    deviations = [d for s in numbered for d in s["deviations"]]
+    if open_points or deviations:
+        out.append("\nWHAT IS STILL MISSING from earlier sessions (mention 1–2 of these in the opening):")
+        out += [f"- Open point: {p}" for p in open_points]
+        out += [f"- Unresolved deviation: {d}" for d in deviations]
+    other = [s for s in sessions if not s["session"]]
+    if other:
+        out.append("Other recorded talks with this person (handover talks etc.):")
+        out += [f"- [{s['path']}]({view_url(s['path'])}) – {s['date']} – {s['topic']}" for s in other]
     res = await store.search(person, "", 6)
-    out = [f"Previous interview sessions with {person}: {len(sessions)}"]
-    out += sessions or ["- none yet"]
     out.append("\nOther mentions in the knowledge base:")
     out.append(_fmt_hits(res))
     return "\n".join(out)
@@ -174,8 +186,9 @@ async def save_interview(
     interviewer: str = "",
     guide: str = "",
     document_status: DocumentStatus = "active",
+    session: int = 0,
 ) -> str:
-    """Saves a confirmed interview protocol under interviews/<person>/.
+    """Saves a confirmed interview protocol under interviews/<topic>/.
 
     Args:
         person: Name of the interviewed person.
@@ -186,9 +199,12 @@ async def save_interview(
         tags: 3-6 lowercase keywords, used as metadata.
         interviewer: Only if the interviewer's name was explicitly stated; otherwise leave empty.
         guide: Optional, guide used (path).
+        session: Session number from person_overview ("NEXT INTERVIEW SESSION").
         document_status: Status selected by the user: active, inactive or draft.
     """
-    path = store.save_interview(person, topic, content, interviewer, guide, places, tags, document_status)
+    path = store.save_interview(
+        person, topic, content, interviewer, guide, places, tags, document_status, int(session or 0)
+    )
     return f"Saved: [{path}]({view_url(path)}). Status: {document_status}."
 
 

@@ -482,9 +482,6 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
 
 /* ------------------------------------------------------------------ Interview */
 
-/** Every interview follows the workday walkthrough (see knowledge/_guides). */
-const INTERVIEW_GUIDE = '_guides/01_workday-walkthrough.md';
-
 function InterviewDialog({ onClose }: { onClose: () => void }) {
   const localize = useLocalize();
   const [people, setPeople] = useState<Person[]>([]);
@@ -501,7 +498,6 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
       'Start the knowledge interview.',
       `Person: ${person.trim()}`,
       `Topic: ${topic.trim()}`,
-      `Guide: ${INTERVIEW_GUIDE}`,
       `Document status: ${status}`,
     ]
       .filter(Boolean)
@@ -515,7 +511,7 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
     <Modal title="Start a knowledge interview" onClose={onClose}>
       <div className="flex flex-col gap-3">
         <p className="text-xs text-text-secondary">
-          The assistant walks through a normal working day with the person – step by step, about 5–7 short questions – using what the knowledge base already knows. The protocol is saved under <code>interviews/&lt;person&gt;/</code>.
+          Each interview is a short session of about 5–7 questions. Sessions build on each other automatically: first a typical operation step by step, then exceptions and incidents, then a check of the documents against real practice. The protocol is filed by topic under <code>interviews/&lt;topic&gt;/</code>.
         </p>
         <label className="text-xs font-medium text-text-secondary">Person</label>
         <input className={inputCls} list="kb-people" placeholder="e.g. Klaus Behrens" value={person} onChange={(e) => setPerson(e.target.value)} />
@@ -573,10 +569,16 @@ function fmtDate(d: string) {
   return m ? `${m[1]}-${m[2]}-${m[3]}` : d;
 }
 
+/** Topic folders are slugs (e.g. "uebergabe-winterdienst") – show them as readable names. */
+function topicLabel(slug: string) {
+  const text = slug.replace(/[-_]+/g, ' ').trim();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 function folderLabel(path: string) {
   if (!path) return 'All documents';
   const top = path.split('/')[0];
-  return path === top ? FOLDER_LABEL[top] ?? top : path.split('/').slice(-1)[0];
+  return path === top ? FOLDER_LABEL[top] ?? top : topicLabel(path.split('/').slice(-1)[0]);
 }
 
 function folderPathLabel(path: string) {
@@ -857,14 +859,15 @@ export default function KnowledgePanel() {
     }
   };
 
-  const newFolder = async () => {
-    const parent = folder || 'files';
-    const name = window.prompt(`New folder in “${parent}”:`);
-    if (!name?.trim()) return;
+  const removeFolder = async (path: string, count: number) => {
+    const what = count
+      ? `the folder “${folderPathLabel(path)}” and its ${count} document(s)`
+      : `the empty folder “${folderPathLabel(path)}”`;
+    if (!window.confirm(`Delete ${what}? This cannot be undone.`)) return;
     try {
-      const res = await kb<{ path: string }>('/api/folder', json('POST', { path: `${parent}/${name.trim()}` }));
+      await kb(`/api/item?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+      if (folder === path || folder.startsWith(`${path}/`)) setFolder('');
       await Promise.all([loadFolders(), load()]);
-      setFolder(res.path);
     } catch (e) {
       setError(String((e as Error).message));
     }
@@ -1025,20 +1028,28 @@ export default function KnowledgePanel() {
         {/* Filter */}
         <aside className={cn('w-60 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border-light p-3', showFilters ? 'flex' : 'hidden')}>
           <section>
-            <div className="mb-1 flex items-center justify-between px-2">
+            <div className="mb-1 px-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-text-tertiary">Folders</h3>
-              <button type="button" onClick={newFolder} className="text-text-tertiary hover:text-text-primary" title="New folder" aria-label="New folder">
-                <FolderPlus className="size-3.5" />
-              </button>
             </div>
             <Chip active={!folder} onClick={() => setFolder('')} count={all.length}>All documents</Chip>
             {folders.map(([f, n]) => (
-              <div key={f} style={{ paddingLeft: `${(f.split('/').length - 1) * 12}px` }}>
+              <div key={f} className="group relative" style={{ paddingLeft: `${(f.split('/').length - 1) * 12}px` }}>
                 <Chip active={folder === f} onClick={() => setFolder(f)} count={n}>
                   <span className="inline-flex items-center gap-1.5">
                     <Folder className="size-3.5 text-amber-500" /> {folderLabel(f)}
                   </span>
                 </Chip>
+                {!TOP.includes(f) && (
+                  <button
+                    type="button"
+                    onClick={() => removeFolder(f, n)}
+                    className="absolute right-1 top-1/2 hidden -translate-y-1/2 rounded bg-surface-primary p-1 text-text-tertiary hover:text-red-500 group-hover:block"
+                    title="Delete folder"
+                    aria-label={`Delete folder ${folderLabel(f)}`}
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
+                )}
               </div>
             ))}
           </section>
@@ -1155,7 +1166,8 @@ export default function KnowledgePanel() {
         {/* Lesebereich */}
         {selected && (
           <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-border-light">
-            <div className="flex shrink-0 items-center gap-2 border-b border-border-light px-3 py-2">
+            <div className="flex shrink-0 flex-col gap-1.5 border-b border-border-light px-3 py-2">
+              <div className="flex min-w-0 items-center gap-2">
               <button type="button" onClick={() => setSelected(null)} className="rounded-md p-1 text-text-secondary hover:bg-surface-hover" title="Back to list" aria-label="Back to list">
                 <ArrowLeft className="size-4" />
               </button>
@@ -1165,6 +1177,8 @@ export default function KnowledgePanel() {
                   {[sel?.folder && folderPathLabel(sel.folder), sel?.typ, sel?.person && `${sel.person}${sel.rolle ? ` (${sel.rolle})` : ''}`, sel?.datum && fmtDate(sel.datum), sel?.ort].filter(Boolean).join(' · ')}
                 </div>
               </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 pl-7">
               {sel && (
                 <StatusSelect
                   value={sel.document_status ?? 'active'}
@@ -1179,6 +1193,7 @@ export default function KnowledgePanel() {
               <button type="button" onClick={() => remove(selected.path)} className="rounded-md p-1.5 text-text-secondary hover:bg-surface-hover hover:text-red-500" title="Delete" aria-label="Delete document">
                 <Trash2 className="size-4" />
               </button>
+              </div>
             </div>
             <iframe ref={viewer} key={`${viewSrc}:${sel?.status ?? ''}`} title={selected.path} src={viewSrc} className="min-h-0 w-full flex-1 border-0 bg-surface-primary" />
           </section>

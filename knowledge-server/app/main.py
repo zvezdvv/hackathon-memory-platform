@@ -230,7 +230,7 @@ async def speech(
         raise HTTPException(400, "Nothing was recognized – please try again")
     structured, warning = None, ""
     try:
-        structured = await ai.structure(transcript, title, person)
+        structured = await ai.structure(transcript, title, person, store.topic_folders("speech"))
     except RuntimeError as e:
         warning = str(e)  # still save the raw transcript
     if data:

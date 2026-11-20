@@ -1,23 +1,36 @@
 ---
-title: "Walk through a working day"
-description: "Default for a first session: go through a normal working day step by step – what happens, what to watch out for"
+title: "Session 1 – Walk through a typical operation"
+description: "First session: go through a typical day or operation step by step – the map of the work and its pitfalls"
 ---
 
-# Guide: walk through a working day
+# Session 1: walk through a typical operation
 
-Use this for the **first session** with a person. Together with the interview basics it
-gives you a quick, structured overview of how the person works – in 5–7 questions.
+**Opening search (first turn):** `search_knowledge("<topic> Ablauf Reihenfolge Priorität")`
+– to know which steps are already documented.
+
+Goal: the **map** of the work – sequence, places, routines – plus the pitfalls a newcomer
+would fall into. 5–7 questions (see interview basics).
+
+## Pick the right "typical" case first
+
+Many jobs have no single standard day. Pick the case that fits the job and topic:
+- **Event-driven work (e.g. winter service):** *"Wie läuft eine typische Glatteisnacht bei Ihnen ab – vom Alarm bis zum Feierabend?"*
+- **Office / desk work:** *"Wie sieht ein ganz normaler Arbeitstag aus – vom Ankommen bis zum Feierabend?"*
+- **Weekly or seasonal rhythm:** *"Was passiert in einer typischen Woche – gibt es feste Tage für bestimmte Aufgaben?"*
+  (good for things like *"samstags ist Wochenmarkt, da muss vor 6 Uhr alles geräumt sein"*)
 
 ## The loop
 
 ```
-  "Wie sieht ein normaler Arbeitstag aus?"        ← question 1 (overview)
+  Question 1: the typical case (overview)
         │
         ▼
   ┌──► Step: "Was machen Sie dann / wohin geht es?"
   │         │
   │         ▼
-  │    One follow-up: "Worauf muss man dabei achten?"   (only if useful)
+  │    ONE follow-up – the pitfall question:
+  │      "Was würde ein Neuer an dieser Stelle falsch machen?"
+  │      or "Wann läuft das anders als sonst?"
   │         │
   └──── "Und was kommt danach?"
         │
@@ -25,63 +38,56 @@ gives you a quick, structured overview of how the person works – in 5–7 ques
   Stop: interim result + protocol
 ```
 
+Why the pitfall question instead of "Worauf muss man achten?": it produces **concrete
+mistakes and exceptions** ("then the plough gets stuck in the Steingrube") instead of
+general advice ("be careful").
+
 ## Question plan (7 questions)
 
 | # | Purpose | Example (German) |
 |---|---|---|
-| 1 | Overview of the day | *"Wie sieht bei Ihnen ein ganz normaler Arbeitstag aus – vom Ankommen bis zum Feierabend?"* |
-| 2 | First real step | *"Wohin geht es als Erstes – und warum gerade dorthin?"* |
-| 3 | What to watch out for | *"Worauf muss man dort achten?"* |
+| 1 | The typical case | *"Wie läuft eine typische Glatteisnacht bei Ihnen ab?"* |
+| 2 | First real step | *"Was machen Sie als Erstes – und warum?"* |
+| 3 | Pitfall | *"Was würde ein Neuer an dieser Stelle falsch machen?"* |
 | 4 | Next step | *"Und was kommt danach?"* |
-| 5 | What to watch out for / what is done differently | *"Worauf achten Sie dabei – machen Sie da etwas anders als im Plan?"* |
-| 6 | Rest of the day | *"Wie geht der Tag dann zu Ende?"* |
+| 5 | Pitfall / exception | *"Wann läuft das anders als sonst?"* |
+| 6 | End of the operation | *"Wie endet die Nacht – was muss zum Schluss noch erledigt sein?"* |
 | 7 | Most important advice | *"Was würden Sie Ihrer Nachfolgerin als Wichtigstes mitgeben?"* |
 
-Questions 3 and 5 are skipped if the answer to the step already said what to watch out for –
-then go straight to the next step. If question 1 already listed several steps, walk through
-them in order instead of asking question 4 and 6.
+Skip a pitfall question if the answer already contained one. If question 1 already listed
+several steps, walk through them in that order.
 
 ## Example (winter service)
 
-> **Interviewer:** Wie sieht bei Ihnen ein ganz normaler Einsatztag im Winter aus – vom Ankommen bis zum Feierabend?
+> **Interviewer:** Wie läuft eine typische Glatteisnacht bei Ihnen ab – vom Alarm bis zum Feierabend?
 > **Mitarbeiter:** Ich komme am Bauhof an, belade meinen Wagen und fahre los.
 >
 > **Interviewer:** Wohin fahren Sie als Erstes – und warum dorthin?
 > **Mitarbeiter:** Zuerst zum Krankenhaus, da sind die wichtigen Patienten.
 > *(background knowledge from the start: N02 already documents "hospital access first")*
 >
-> **Interviewer:** Dass die Krankenhauszufahrten zuerst dran sind, ist schon festgehalten ([N02](…)). Worauf muss man dort achten?
-> **Mitarbeiter:** Da ist Kopfsteinpflaster, da rutscht das Fahrzeug leicht, da muss man langsam räumen.
+> **Interviewer:** Das mit den Krankenhauszufahrten ist schon festgehalten ([N02](…)). Was würde ein Neuer dort falsch machen?
+> **Mitarbeiter:** Zu schnell räumen – da ist Kopfsteinpflaster, da rutscht das Fahrzeug.
 >
-> **Interviewer:** Danke, das notiere ich. Und was kommt danach?
-> **Mitarbeiter:** Dann mache ich Pause, weil das Auffüllen lange dauert – beim Auffüllen kann ich Pause machen, das machen wir anders als früher.
+> **Interviewer:** Danke. Und was kommt danach?
+> **Mitarbeiter:** Hauptstraßen, dann Pause – beim Auffüllen mache ich gleich Pause, das spart eine halbe Stunde.
 >
-> **Interviewer:** Was machen Sie da genau anders als früher?
-> **Mitarbeiter:** Früher haben wir erst Pause gemacht und dann aufgefüllt, jetzt beides gleichzeitig, das spart eine halbe Stunde.
+> **Interviewer:** Wann läuft das anders als sonst?
+> **Mitarbeiter:** Wenn um halb fünf die Bergstraße noch nicht gestreut ist – dann rufe ich zuerst den Busbetrieb an.
 >
-> **Interviewer:** Wie geht der Tag dann zu Ende?
-> **Mitarbeiter:** …
+> **Interviewer:** Wie endet die Nacht – was muss zum Schluss noch erledigt sein? …
 >
-> **Interviewer:** Was würden Sie Ihrer Nachfolgerin als Wichtigstes mitgeben?
-> **Mitarbeiter:** …
->
-> **Interviewer:** Danke, damit haben wir einen guten Überblick über Ihren Arbeitstag. Hier ist der Zwischenstand – passt das so? *(protocol follows)*
+> **Interviewer:** Danke, damit haben wir einen guten Überblick über Ihren Ablauf. Hier ist der Zwischenstand – passt das so? *(protocol follows)*
 
-Notice what the interviewer does **not** do: it does not ask about the exact road surface,
-the speed, the vehicle type or the history of the hospital rule. Those are open points for a
-deep-dive session.
+The interviewer does **not** dig into road surface, speed or vehicle type – those are open
+points for later sessions.
 
-## Variants for the first question
+## Session-specific protocol section
 
-Pick the one that fits the person's job:
-- **Normal day:** *"Wie sieht ein ganz normaler Arbeitstag aus?"*
-- **Shift / operation:** *"Wie läuft eine typische Einsatznacht bei Glatteis ab – vom Alarm bis zum Feierabend?"*
-- **Week / season:** *"Was passiert in einer typischen Woche – gibt es feste Tage für bestimmte Aufgaben?"*
-  (good for things like *"samstags ist Wochenmarkt, da muss vor 6 Uhr alles geräumt sein"*)
-
-## Protocol
-
-Fill the table *Arbeitsablauf* with one row per step in the order of the day, the column
-*Worauf achten* with what the person said about it. Put "always/never" statements under
-*Regeln* (e.g. *"REGEL: Krankenhauszufahrten immer zuerst – Warum: Patienten"*). Everything
-you skipped because of the budget goes under *Offene Punkte*.
+```markdown
+## Arbeitsablauf
+| # | Schritt | Wo / wann | Was ein Neuer falsch machen würde |
+|---|---|---|---|
+| 1 | Bauhof, Fahrzeug beladen | Schichtbeginn | … |
+| 2 | Krankenhauszufahrten | zuerst | zu schnell räumen – Kopfsteinpflaster |
+```

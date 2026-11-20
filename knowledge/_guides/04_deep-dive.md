@@ -1,11 +1,14 @@
 ---
-title: "Deep dive on open points"
-description: "Follow-up session: take the open points of earlier interviews and clarify places, thresholds and decisions"
+title: "Session 4+ – Deep dive on open points"
+description: "From the fourth session on: take the open points of earlier sessions and clarify places, thresholds and decisions"
 ---
 
 # Guide: deep dive on open points
 
-Use this for a **follow-up session** after a first walkthrough. The interview basics still
+**Opening search (first turn):** `search_knowledge` with the key terms of the 2–3 open points
+you picked from person_overview.
+
+Use this from the **fourth session** on, after the walkthrough, the incidents and the plan check. The interview basics still
 apply – **5–7 questions, then stop**.
 
 ## Preparation (silently)
