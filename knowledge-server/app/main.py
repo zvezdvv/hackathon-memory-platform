@@ -175,6 +175,31 @@ AUDIO_TYPES = {"webm": "audio/webm", "ogg": "audio/ogg", "m4a": "audio/mp4"}
 MAX_RECORDING_BYTES = 25_000_000
 
 
+async def _read_recording(audio: UploadFile) -> tuple[bytes, str, str]:
+    ext = Path(audio.filename or "").suffix.lower().lstrip(".")
+    media_type = AUDIO_TYPES.get(ext, "")
+    if not media_type:
+        raise HTTPException(400, "Unsupported browser recording format")
+    data = await audio.read(MAX_RECORDING_BYTES + 1)
+    if not data:
+        raise HTTPException(400, "Empty recording")
+    if len(data) > MAX_RECORDING_BYTES:
+        raise HTTPException(413, "Recordings must be at most 25 MB")
+    return data, f"recording.{ext}", media_type
+
+
+@app.post("/api/transcribe", dependencies=[Depends(require_user)])
+async def transcribe(audio: UploadFile = File(...)):
+    """Transcription only (Scribe v2) – used for the live transcript while recording."""
+    if not ai.enabled():
+        raise HTTPException(503, "OPENROUTER_KEY is not configured on the server")
+    data, filename, media_type = await _read_recording(audio)
+    try:
+        return {"text": await ai.transcribe(data, filename, media_type)}
+    except RuntimeError as e:
+        raise HTTPException(502, str(e)) from e
+
+
 @app.post("/api/speech", dependencies=[Depends(require_user)])
 async def speech(
     audio: UploadFile | None = File(None),
@@ -183,27 +208,23 @@ async def speech(
     person: str = Form(""),
     document_status: DocumentStatus = Form("active"),
 ):
-    """Voice note: transcribe with Scribe v2 (if audio), structure with an LLM, save to speech/."""
+    """Voice note: structure with an LLM and save to speech/.
+
+    With audio and text, the text is the (possibly corrected) transcript from the live
+    transcription and the audio is only stored. With audio only, it is transcribed first.
+    """
     if not ai.enabled():
         raise HTTPException(503, "OPENROUTER_KEY is not configured on the server")
     data = b""
     filename, media_type = "", ""
     audio_name, transcriber, transcript = "", "", text.strip()
     if audio is not None:
-        ext = Path(audio.filename or "").suffix.lower().lstrip(".")
-        media_type = AUDIO_TYPES.get(ext, "")
-        if not media_type:
-            raise HTTPException(400, "Unsupported browser recording format")
-        filename = f"recording.{ext}"
-        data = await audio.read(MAX_RECORDING_BYTES + 1)
-        if not data:
-            raise HTTPException(400, "Empty recording")
-        if len(data) > MAX_RECORDING_BYTES:
-            raise HTTPException(413, "Recordings must be at most 25 MB")
-        try:
-            transcript = await ai.transcribe(data, filename, media_type)
-        except RuntimeError as e:
-            raise HTTPException(502, str(e)) from e
+        data, filename, media_type = await _read_recording(audio)
+        if not transcript:
+            try:
+                transcript = await ai.transcribe(data, filename, media_type)
+            except RuntimeError as e:
+                raise HTTPException(502, str(e)) from e
         transcriber = ai.TRANSCRIBE_MODEL
     if not transcript:
         raise HTTPException(400, "Nothing was recognized – please try again")

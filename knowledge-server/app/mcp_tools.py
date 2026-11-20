@@ -172,8 +172,8 @@ async def save_interview(
     Args:
         person: Name of the interviewed person.
         topic: Topic of the session.
-        content: Protocol in Markdown following the guide's format (Summary, Rules with
-            **RULE:** items, Places, Processes, Deviations, Open points).
+        content: Protocol in Markdown following the interview basics format (Kurzfassung/
+            Summary, Arbeitsablauf table, Regeln with **REGEL:** items, Abweichungen, Offene Punkte).
         places: Every place mentioned (street/section names), used as metadata.
         tags: 3-6 lowercase keywords, used as metadata.
         interviewer: Only if the interviewer's name was explicitly stated; otherwise leave empty.

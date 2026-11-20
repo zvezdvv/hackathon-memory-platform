@@ -271,18 +271,25 @@ function fmtSeconds(s: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
+const LIVE_INTERVAL_MS = 3000;
+
+function recordingName(type: string) {
+  const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+  return `recording.${ext}`;
+}
+
 /**
- * Voice note: record audio → server transcribes with ElevenLabs Scribe v2 →
- * an LLM structures it and fills in the metadata → saved under speech/.
+ * Voice note: while recording, the audio is transcribed live with ElevenLabs Scribe v2 so the
+ * speaker sees the text. After stopping, a final transcript can be corrected. "Save" passes it
+ * to the LLM, which structures it and fills in the metadata → saved under speech/ (active).
  */
 function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (path: string, warning: string) => void }) {
   const [title, setTitle] = useState('');
   const [person, setPerson] = useState('');
-  const [status, setStatus] = useState<DocumentStatus>('active');
-  const [mode, setMode] = useState<'record' | 'type'>('record');
   const [text, setText] = useState('');
   const [recording, setRecording] = useState(false);
   const [requestingMic, setRequestingMic] = useState(false);
+  const [finalizing, setFinalizing] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [clip, setClip] = useState<Blob | null>(null);
   const [clipUrl, setClipUrl] = useState('');
@@ -291,6 +298,8 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
   const recRef = useRef<MediaRecorder | null>(null);
   const chunks = useRef<Blob[]>([]);
   const timer = useRef<number | undefined>(undefined);
+  const live = useRef<number | undefined>(undefined);
+  const inflight = useRef(false);
   const mounted = useRef(false);
 
   const supported = typeof window.MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
@@ -300,6 +309,27 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
     setClipUrl(url);
     return () => { if (url) URL.revokeObjectURL(url); };
   }, [clip]);
+
+  const transcribe = async (blob: Blob): Promise<string> => {
+    const fd = new FormData();
+    fd.append('audio', blob, recordingName(blob.type));
+    const res = await kb<{ text: string }>('/api/transcribe', { method: 'POST', body: fd });
+    return res.text;
+  };
+
+  // Live transcript: re-transcribe everything recorded so far every few seconds
+  const liveTick = async (type: string) => {
+    if (inflight.current || !chunks.current.length) return;
+    inflight.current = true;
+    try {
+      const textSoFar = await transcribe(new Blob(chunks.current, { type }));
+      if (mounted.current && recRef.current?.state === 'recording') setText(textSoFar);
+    } catch {
+      /* live preview is best effort – the final transcript runs after stopping */
+    } finally {
+      inflight.current = false;
+    }
+  };
 
   const start = async () => {
     setError('');
@@ -315,17 +345,31 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
       const rec = new MediaRecorder(input);
       chunks.current = [];
       rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
-      rec.onstop = () => {
+      rec.onstop = async () => {
         input.getTracks().forEach((t) => t.stop());
-        setClip(new Blob(chunks.current, { type: rec.mimeType || 'audio/webm' }));
         window.clearInterval(timer.current);
+        window.clearInterval(live.current);
         setRecording(false);
+        const full = new Blob(chunks.current, { type: rec.mimeType || 'audio/webm' });
+        setClip(full);
+        if (!full.size) return;
+        setFinalizing(true);
+        try {
+          const finalText = await transcribe(full);
+          if (mounted.current) setText(finalText);
+        } catch (e) {
+          if (mounted.current) setError(`Transcription failed: ${(e as Error).message}`);
+        } finally {
+          if (mounted.current) setFinalizing(false);
+        }
       };
       recRef.current = rec;
-      rec.start();
+      rec.start(1000);
       setClip(null);
+      setText('');
       setSeconds(0);
       timer.current = window.setInterval(() => setSeconds((x) => x + 1), 1000);
+      live.current = window.setInterval(() => liveTick(rec.mimeType || 'audio/webm'), LIVE_INTERVAL_MS);
       setRecording(true);
     } catch {
       stream?.getTracks().forEach((track) => track.stop());
@@ -341,6 +385,7 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
     return () => {
       mounted.current = false;
       window.clearInterval(timer.current);
+      window.clearInterval(live.current);
       const recorder = recRef.current;
       if (recorder) {
         recorder.onstop = null;
@@ -355,15 +400,10 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
     const fd = new FormData();
     fd.append('title', title);
     fd.append('person', person);
-    fd.append('document_status', status);
-    if (mode === 'record' && clip) {
-      const ext = clip.type.includes('mp4') ? 'm4a' : clip.type.includes('ogg') ? 'ogg' : 'webm';
-      fd.append('audio', clip, `recording.${ext}`);
-      setBusy('Transcribing with ElevenLabs Scribe v2 and structuring …');
-    } else {
-      fd.append('text', text);
-      setBusy('Structuring and filling in metadata …');
-    }
+    fd.append('document_status', 'active');
+    fd.append('text', text);
+    if (clip?.size) fd.append('audio', clip, recordingName(clip.type));
+    setBusy('Structuring the note and filling in metadata …');
     try {
       const res = await kb<SpeechResult>('/api/speech', { method: 'POST', body: fd });
       onSaved(res.path, res.warning);
@@ -374,78 +414,66 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
     }
   };
 
-  const ready = mode === 'record' ? !!clip?.size && !recording && !requestingMic : !!text.trim();
+  const ready = !!text.trim() && !recording && !requestingMic && !finalizing;
 
   return (
     <Modal title="Voice note" onClose={busy ? () => undefined : onClose}>
       <div className="flex flex-col gap-3">
-        <p className="text-xs text-text-secondary">
-          Speak freely – the recording is transcribed with ElevenLabs Scribe v2, then an LLM turns it into a structured note
-          (summary, sections, people, places, tags). The original transcript and recording are kept.
-        </p>
-        <div className="flex gap-1 rounded-lg bg-surface-secondary p-1 text-xs">
-          {(['record', 'type'] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              onClick={() => setMode(m)}
-              disabled={recording || requestingMic || !!busy}
-              className={cn('flex-1 rounded-md px-2 py-1', mode === m ? 'bg-surface-primary font-medium text-text-primary shadow-sm' : 'text-text-secondary')}
-            >
-              {m === 'record' ? 'Record audio' : 'Type text'}
+        <div className="flex items-center gap-4">
+          {recording ? (
+            <button type="button" onClick={stop} className="flex size-14 shrink-0 items-center justify-center rounded-full bg-red-500 text-white shadow-lg hover:bg-red-600" aria-label="Stop recording">
+              <Square className="size-5 fill-current" />
             </button>
-          ))}
+          ) : (
+            <button type="button" onClick={start} disabled={!supported || requestingMic || finalizing || !!busy} className="flex size-14 shrink-0 items-center justify-center rounded-full bg-green-600 text-white shadow-lg hover:bg-green-700 disabled:opacity-50" aria-label="Start recording">
+              <Mic className="size-6" />
+            </button>
+          )}
+          <div className="min-w-0 text-sm">
+            {recording ? (
+              <span className="flex items-center gap-1.5 font-medium text-red-500">
+                <span className="size-2 animate-pulse rounded-full bg-red-500" /> Recording {fmtSeconds(seconds)} · live transcript
+              </span>
+            ) : finalizing ? (
+              <span className="flex items-center gap-1.5 text-text-secondary"><Loader2 className="size-3.5 animate-spin" /> Finalizing transcript …</span>
+            ) : clip?.size ? (
+              <span className="text-text-secondary">Done ({fmtSeconds(seconds)}) – check the text, then save.</span>
+            ) : (
+              <span className="text-text-secondary">
+                {supported ? 'Press the microphone and just talk – you will see the text appear.' : 'Recording is not supported in this browser – type your note instead.'}
+              </span>
+            )}
+          </div>
         </div>
 
-        {mode === 'record' ? (
-          <div className="flex flex-col items-center gap-3 rounded-lg border border-border-light p-4">
-            {recording ? (
-              <button type="button" onClick={stop} className="flex size-16 items-center justify-center rounded-full bg-red-500 text-white shadow-lg hover:bg-red-600" aria-label="Stop recording">
-                <Square className="size-6 fill-current" />
-              </button>
-            ) : (
-              <button type="button" onClick={start} disabled={!supported || requestingMic || !!busy} className="flex size-16 items-center justify-center rounded-full bg-green-600 text-white shadow-lg hover:bg-green-700 disabled:opacity-50" aria-label="Start recording">
-                <Mic className="size-7" />
-              </button>
-            )}
-            <div className="text-sm text-text-secondary">
-              {recording ? (
-                <span className="flex items-center gap-1.5 text-red-500"><span className="size-2 animate-pulse rounded-full bg-red-500" />Recording {fmtSeconds(seconds)}</span>
-              ) : clip ? (
-                `Recording ready (${fmtSeconds(seconds)})`
-              ) : supported ? (
-                'Click to start recording'
-              ) : (
-                'Recording is not supported in this browser'
-              )}
-            </div>
-            {clipUrl && !recording && <audio controls src={clipUrl} className="w-full" />}
-          </div>
-        ) : (
-          <textarea
-            className={cn(inputCls, 'min-h-40 resize-y')}
-            placeholder="Type or paste your notes – they are structured the same way."
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
-        )}
+        <textarea
+          className={cn(inputCls, 'min-h-44 resize-y leading-relaxed', recording && 'border-red-500/50')}
+          placeholder={recording ? 'Listening …' : 'The transcript appears here while you speak. You can also type or correct it.'}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          readOnly={recording || finalizing}
+          aria-label="Transcript"
+        />
+        {clipUrl && !recording && <audio controls src={clipUrl} className="w-full" />}
 
         <div className="grid grid-cols-2 gap-2">
           <input className={inputCls} placeholder="Title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
           <input className={inputCls} placeholder="Your name (optional)" value={person} onChange={(e) => setPerson(e.target.value)} />
         </div>
-        <StatusSelect value={status} onChange={setStatus} disabled={!!busy} />
         {busy && (
           <p className="flex items-center gap-1.5 text-xs text-text-secondary">
             <Loader2 className="size-3.5 animate-spin" /> {busy}
           </p>
         )}
         {error && <p className="text-xs text-red-500">{error}</p>}
-        <div className="flex justify-end gap-2">
-          <button type="button" className={btnCls} onClick={onClose} disabled={!!busy}>Cancel</button>
-          <button type="button" className={primaryCls} onClick={save} disabled={!ready || !!busy}>
-            {busy && <Loader2 className="size-4 animate-spin" />} Transcribe &amp; save
-          </button>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-text-tertiary">Saved as active · structured by an LLM</span>
+          <div className="flex gap-2">
+            <button type="button" className={btnCls} onClick={onClose} disabled={!!busy}>Cancel</button>
+            <button type="button" className={primaryCls} onClick={save} disabled={!ready || !!busy}>
+              {busy && <Loader2 className="size-4 animate-spin" />} Save note
+            </button>
+          </div>
         </div>
       </div>
     </Modal>
@@ -454,24 +482,18 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
 
 /* ------------------------------------------------------------------ Interview */
 
+/** Every interview follows the workday walkthrough (see knowledge/_guides). */
+const INTERVIEW_GUIDE = '_guides/01_workday-walkthrough.md';
+
 function InterviewDialog({ onClose }: { onClose: () => void }) {
   const localize = useLocalize();
   const [people, setPeople] = useState<Person[]>([]);
-  const [guides, setGuides] = useState<Guide[]>([]);
   const [person, setPerson] = useState('');
   const [topic, setTopic] = useState('');
-  const [guide, setGuide] = useState('');
   const [status, setStatus] = useState<DocumentStatus>('active');
 
   useEffect(() => {
     kb<Person[]>('/api/people').then(setPeople).catch(() => setPeople([]));
-    kb<Guide[]>('/api/guides')
-      .then((g) => {
-        const usable = g.filter((x) => !x.path.includes('00_'));
-        setGuides(usable);
-        setGuide(usable[0]?.path ?? '');
-      })
-      .catch(() => setGuides([]));
   }, []);
 
   const start = () => {
@@ -479,7 +501,7 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
       'Start the knowledge interview.',
       `Person: ${person.trim()}`,
       `Topic: ${topic.trim()}`,
-      guide ? `Guide: ${guide}` : '',
+      `Guide: ${INTERVIEW_GUIDE}`,
       `Document status: ${status}`,
     ]
       .filter(Boolean)
@@ -493,7 +515,7 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
     <Modal title="Start a knowledge interview" onClose={onClose}>
       <div className="flex flex-col gap-3">
         <p className="text-xs text-text-secondary">
-          The interview assistant reads the guide, checks what the knowledge base already holds about the person and asks targeted questions about the gaps. The protocol is saved under <code>interviews/&lt;person&gt;/</code>.
+          The assistant walks through a normal working day with the person – step by step, about 5–7 short questions – using what the knowledge base already knows. The protocol is saved under <code>interviews/&lt;person&gt;/</code>.
         </p>
         <label className="text-xs font-medium text-text-secondary">Person</label>
         <input className={inputCls} list="kb-people" placeholder="e.g. Klaus Behrens" value={person} onChange={(e) => setPerson(e.target.value)} />
@@ -502,13 +524,6 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
         </datalist>
         <label className="text-xs font-medium text-text-secondary">Topic</label>
         <input className={inputCls} placeholder="e.g. Black ice operations at night" value={topic} onChange={(e) => setTopic(e.target.value)} />
-        <label htmlFor="kb-interview-guide" className="text-xs font-medium text-text-secondary">
-          {localize('com_ui_memory_interview_guide')}
-        </label>
-        <select id="kb-interview-guide" className={inputCls} value={guide} onChange={(e) => setGuide(e.target.value)}>
-          {guides.map((g) => <option key={g.path} value={g.path}>{g.title}</option>)}
-          <option value="">Basic rules only</option>
-        </select>
         <StatusSelect value={status} onChange={setStatus} />
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className={btnCls} onClick={onClose}>Cancel</button>
