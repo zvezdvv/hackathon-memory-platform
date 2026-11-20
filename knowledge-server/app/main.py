@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from .mcp_tools import mcp
 from .store import (
-    EDITABLE_EXT, JWT_SECRET, DocumentStatus, rel, safe_path, split_frontmatter, store, validate_upload,
+    EDITABLE_EXT, JWT_SECRET, DocumentStatus, rel, safe_path, split_frontmatter, store,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -117,14 +117,12 @@ async def upload(
 ):
     if document_statuses and len(document_statuses) != len(files):
         raise HTTPException(400, "Choose one status for each file")
-    uploads = []
-    for f in files:
-        name = f.filename or "file"
-        data = await f.read()
-        _guard(lambda: validate_upload(name, data))
-        uploads.append((name, data))
-    statuses = document_statuses or ["active"] * len(uploads)
-    saved = _guard(lambda: [store.save_upload(folder, name, data, s) for (name, data), s in zip(uploads, statuses)])
+    statuses = document_statuses or ["active"] * len(files)
+    uploads = [(file.filename or "file", await file.read(), status) for file, status in zip(files, statuses)]
+    try:
+        saved = await store.save_uploads(folder, uploads)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     return {"saved": saved}
 
 

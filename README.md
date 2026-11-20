@@ -45,7 +45,7 @@ The **Memory** tab opens the document workspace beside the LibreChat sidebar. It
 | `knowledge/interviews/<person>/` | Interview protocols |
 | `knowledge/_guides/` | Markdown guides that tell the interview assistant how to ask |
 
-Memory accepts PDF, Markdown and TXT. Active documents are indexed automatically. For PDFs, OpenRouter sends the original file directly to GPT-6.1 Terra and the RAG API embeds the returned transcript. Not Active and Draft documents stay in the list and are excluded from search. Chat citations open the document with the passage highlighted.
+Memory accepts PDF (up to 10 pages), Markdown and TXT. Active documents are indexed automatically. Each PDF page is rendered and sent as an image to GPT-6.1 Terra via OpenRouter. The RAG API embeds the transcript. Not Active and Draft documents stay in the list and are excluded from search. Chat citations open the document with the passage highlighted.
 
 The `knowledge` service also exposes an MCP server that LibreChat uses internally (`http://knowledge:8100/mcp/`, blocked at the proxy). Two assistants in the model selector use it: **Smart City Assistant** (answers with inline source links) and **Knowledge Interview** (asks targeted questions and saves the protocol). Uploads, edits and deletions require a LibreChat login.
 

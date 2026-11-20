@@ -22,7 +22,7 @@ knowledge/  (folder = single source of truth)  ──auto──► rag_api ─�
 | `knowledge/_guides/` | Markdown instructions that tell the interview assistant how to ask |
 | `knowledge/.state/` | Internal index state and text cache (do not touch) |
 
-Uploads accept PDF, Markdown (`.md`, `.markdown`) and TXT. A document's status is stored
+Uploads accept PDF (up to 10 pages), Markdown (`.md`, `.markdown`) and TXT. A document's status is stored
 under `knowledge/.state/` and can be changed in its viewer. Existing files default to Active.
 Only Active documents participate in semantic and keyword search, including via MCP.
 
@@ -33,9 +33,9 @@ version: search results and the overlay flag the older sources.
 
 ## PDF processing and embeddings
 
-Set `OPENROUTER_KEY` in the repository's `.env`. The knowledge server sends the original
-PDF as a native file input to `openai/gpt-6.1-terra` and stores its transcription for the
-viewer and RAG index. The RAG API embeds the text using `mongodb/voyage-4`. Existing active PDFs
+Set `OPENROUTER_KEY` in the repository's `.env`. The knowledge server renders each PDF
+page with Poppler and sends its image to `openai/gpt-6.1-terra`. It keeps the original PDF and
+stores the transcription for the viewer and RAG index. The RAG API embeds the text using `mongodb/voyage-4`. Existing active PDFs
 are reprocessed automatically when the extraction version changes. Draft and inactive PDFs
 are processed when activated.
 

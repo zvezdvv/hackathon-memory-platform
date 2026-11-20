@@ -1,5 +1,6 @@
 import importlib
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -33,9 +34,11 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.store.ensure_layout()
 
     async def test_excludes_draft_and_inactive_from_both_search_paths(self):
-        active = self.store.save_upload("files", "active.txt", b"Winterdienst code ACTIVE")
-        draft = self.store.save_upload("files", "draft.md", b"Winterdienst code DRAFT", "draft")
-        inactive = self.store.save_upload("files", "inactive.txt", b"Winterdienst code INACTIVE", "inactive")
+        active, draft, inactive = await self.store.save_uploads("files", [
+            ("active.txt", b"Winterdienst code ACTIVE", "active"),
+            ("draft.md", b"Winterdienst code DRAFT", "draft"),
+            ("inactive.txt", b"Winterdienst code INACTIVE", "inactive"),
+        ])
         for entry in self.store.entries.values():
             entry["status"] = "indexed"
         self.store._save()
@@ -58,7 +61,8 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_legacy_pdf_is_reprocessed_and_only_transcript_is_embedded(self):
         original = b"%PDF-1.7 original contents"
-        path = self.store.save_upload("files", "sample.pdf", original)
+        with patch.object(storage, "pdf_page_count", return_value=1):
+            [path] = await self.store.save_uploads("files", [("sample.pdf", original, "active")])
         self.store.entries[path]["status"] = "indexed"
         self.assertEqual(self.store.get_text(path), "")
         request = httpx.Request("POST", "http://rag.test/embed")
@@ -68,7 +72,7 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         ])
         with patch.object(storage, "extract_pdf", AsyncMock(return_value="Recognizable section § 3")) as extract:
             await self.store.sync()
-        extract.assert_awaited_once_with("sample.pdf", original)
+        extract.assert_awaited_once_with(original)
         self.assertEqual(self.store._rag.await_args_list[0].args, ("DELETE", "/documents"))
         self.assertEqual(
             self.store._rag.await_args.kwargs["files"]["file"],
@@ -78,7 +82,10 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.index_status(path, self.store.entries[path]), "indexed")
 
     async def test_pdf_extraction_error_cannot_fall_back_to_old_text(self):
-        path = self.store.save_upload("files", "sample.pdf", b"%PDF-1.7 original contents")
+        with patch.object(storage, "pdf_page_count", return_value=1):
+            [path] = await self.store.save_uploads(
+                "files", [("sample.pdf", b"%PDF-1.7 original contents", "active")],
+            )
         self.store.entries[path]["status"] = "indexed"
         cache = storage.TEXT_CACHE / f"{storage.file_id_for(path)}.txt"
         cache.write_text("corrupt legacy text")
@@ -89,31 +96,53 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.index_status(path, self.store.entries[path]), "error")
         self.store._rag.assert_not_awaited()
 
-    def test_unsupported_uploads_are_refused(self):
+    async def test_unsupported_uploads_are_refused_before_saving_the_batch(self):
         with self.assertRaisesRegex(ValueError, "PDF, Markdown and TXT"):
-            self.store.save_upload("files", "sample.csv", b"foo,bar")
+            await self.store.save_uploads("files", [
+                ("valid.txt", b"valid", "active"), ("sample.csv", b"foo,bar", "active"),
+            ])
+        self.assertEqual(self.store.entries, {})
         with self.assertRaisesRegex(ValueError, "valid PDF"):
-            self.store.save_upload("files", "sample.pdf", b"not a pdf")
+            await self.store.save_uploads("files", [("sample.pdf", b"not a pdf", "active")])
 
 
-class NativePdfTests(unittest.IsolatedAsyncioTestCase):
-    async def test_sends_pdf_as_native_file_and_refuses_truncated_output(self):
-        params = {}
+class PdfPageTests(unittest.IsolatedAsyncioTestCase):
+    def test_rejects_pdfs_over_ten_pages(self):
+        with patch.object(
+            pdf.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, stdout=b"Pages: 11\n"),
+        ):
+            with self.assertRaisesRegex(ValueError, "at most 10 pages .*11"):
+                pdf.pdf_page_count(b"%PDF-1.7")
+
+    async def test_sends_each_page_to_terra_in_order(self):
+        requests = []
 
         def respond(request):
-            params.update(json.loads(request.content))
+            requests.append(json.loads(request.content))
+            return httpx.Response(200, json={
+                "choices": [{"message": {"content": f"Transcription {len(requests)}"}, "finish_reason": "stop"}],
+            })
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        with (
+            patch.dict("os.environ", {"OPENROUTER_KEY": "test-key"}),
+            patch.object(pdf, "render_pages", return_value=[b"ab", b"cd"]),
+            patch.object(pdf.httpx, "AsyncClient", return_value=client),
+        ):
+            self.assertEqual(
+                await pdf.extract_pdf(b"%PDF-1.7"),
+                "## Page 1\n\nTranscription 1\n\n## Page 2\n\nTranscription 2",
+            )
+        self.assertEqual([item["model"] for item in requests], ["openai/gpt-6.1-terra"] * 2)
+        inputs = [item["messages"][1]["content"][1]["image_url"]["url"] for item in requests]
+        self.assertEqual(inputs, ["data:image/jpeg;base64,YWI=", "data:image/jpeg;base64,Y2Q="])
+
+    async def test_refuses_truncated_page_output(self):
+        def respond(request):
             return httpx.Response(200, json={
                 "choices": [{"message": {"content": "partial text"}, "finish_reason": "length"}],
             })
 
-        client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
-        with patch.dict("os.environ", {"OPENROUTER_KEY": "test-key"}):
-            with patch.object(pdf.httpx, "AsyncClient", return_value=client):
-                with self.assertRaisesRegex(RuntimeError, "output limit"):
-                    await pdf.extract_pdf("input.pdf", b"%PDF")
-        self.assertEqual(params["model"], "openai/gpt-6.1-terra")
-        self.assertEqual(params["plugins"][0]["pdf"]["engine"], "native")
-        self.assertEqual(params["messages"][1]["content"][1]["file"], {
-            "file_data": "data:application/pdf;base64,JVBERg==",
-            "filename": "input.pdf",
-        })
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            with self.assertRaisesRegex(RuntimeError, "page 3 exceeded .*output limit"):
+                await pdf.transcribe_page(client, b"screenshot", 3)

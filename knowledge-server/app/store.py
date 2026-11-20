@@ -24,7 +24,7 @@ from urllib.parse import quote
 import httpx
 import jwt
 
-from .pdf import EXTRACTION_VERSION, MAX_PDF_BYTES, extract_pdf
+from .pdf import EXTRACTION_VERSION, extract_pdf, pdf_page_count
 
 log = logging.getLogger("knowledge")
 
@@ -159,10 +159,7 @@ def validate_upload(filename: str, data: bytes) -> None:
     if ext not in UPLOAD_EXT:
         raise ValueError("Only PDF, Markdown and TXT files are supported")
     if ext == ".pdf":
-        if len(data) > MAX_PDF_BYTES:
-            raise ValueError("PDF files must be at most 50 MB")
-        if b"%PDF-" not in data[:1024]:
-            raise ValueError("The file is not a valid PDF")
+        pdf_page_count(data)
     elif b"\0" in data:
         raise ValueError("Markdown and TXT uploads must contain plain text")
 
@@ -360,7 +357,7 @@ class KnowledgeStore:
                 if entry.get("pdf_version") == EXTRACTION_VERSION and cache.exists():
                     text = cache.read_text("utf-8")
                 else:
-                    text = await extract_pdf(filename, data)
+                    text = await extract_pdf(data)
                 data = text.encode("utf-8")
                 filename = f"{p.stem}.txt"
             elif p.suffix.lower() in TEXT_EXT:
@@ -745,14 +742,22 @@ class KnowledgeStore:
         status = self.document_status(rel(p)) if overwrite and p.exists() else document_status
         return self._write(p, content.encode("utf-8"), status)
 
-    def save_upload(self, folder: str, filename: str, data: bytes, document_status: DocumentStatus = "active") -> str:
-        validate_upload(filename, data)
+    async def save_uploads(self, folder: str, files: list[tuple[str, bytes, DocumentStatus]]) -> list[str]:
+        def validate_batch() -> None:
+            for name, data, status in files:
+                validate_upload(name, data)
+                if status not in DOCUMENT_STATUSES:
+                    raise ValueError("Choose Active, Not Active or Draft")
+
+        await asyncio.to_thread(validate_batch)
         d = safe_path(folder or "files")
         if d == ROOT:
             d = ROOT / "files"
         d.mkdir(parents=True, exist_ok=True)
-        p = unique_path(d / safe_filename(filename))
-        return self._write(p, data, document_status)
+        return [
+            self._write(unique_path(d / safe_filename(name)), data, status)
+            for name, data, status in files
+        ]
 
     def _write(self, path: Path, data: bytes, status: DocumentStatus) -> str:
         relative = rel(path)
