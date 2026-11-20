@@ -10,7 +10,7 @@ On a Linux host with Docker Compose and OpenSSL, make TCP ports 80 and 443 reach
 bash deploy/init-env.sh <public-host>
 ```
 
-Set `OPENROUTER_KEY` in the generated `.env`. The chat endpoint uses `openai/gpt-4.1-mini` and file indexing and search use `openai/text-embedding-3-small`, all through OpenRouter. With an empty key, LibreChat can accept a per-user OpenRouter key for chat, and file indexing requires the server-side key.
+Set `OPENROUTER_KEY` in the generated `.env`. The chat endpoint uses `openai/gpt-6-luna` and file indexing and search use `mongodb/voyage-4`, all through OpenRouter. Voyage 4 uses the `smartcity-voyage-4` pgvector collection. With an empty key, LibreChat can accept a per-user OpenRouter key for chat, and file indexing requires the server-side key.
 
 Use `PUBLIC_HOST` for the canonical URL. When switching an IP-based deployment to a domain, set `PUBLIC_HOST` to the DNS name and `REDIRECT_IP` to the previous IPv4 address in `.env`. Old HTTP and HTTPS links redirect to the canonical domain with their path and query intact.
 

@@ -86,7 +86,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run deploy/init-env.sh}
       JWT_SECRET: ${JWT_SECRET:?Run deploy/init-env.sh}
       EMBEDDINGS_PROVIDER: openai
-      EMBEDDINGS_MODEL: openai/text-embedding-3-small
+      EMBEDDINGS_MODEL: mongodb/voyage-4
+      COLLECTION_NAME: smartcity-voyage-4
       RAG_OPENAI_BASEURL: https://openrouter.ai/api/v1
       RAG_OPENAI_API_KEY: ${OPENROUTER_KEY:-not-configured}
       RAG_CHECK_EMBEDDING_CTX_LENGTH: 'false'
