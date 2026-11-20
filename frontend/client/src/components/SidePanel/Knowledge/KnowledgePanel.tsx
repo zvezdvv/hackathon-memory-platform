@@ -7,7 +7,8 @@
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { QueryKeys, getTokenHeader } from 'librechat-data-provider';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -31,10 +32,10 @@ import {
   Upload,
   X,
 } from 'lucide-react';
-import { getTokenHeader } from 'librechat-data-provider';
+import type { ReactNode } from 'react';
+import { DEFAULT_PANEL, MEMORY_PANE_ID, useActivePanel } from '~/Providers';
 import OpenSidebar from '~/components/Chat/Menus/OpenSidebar';
 import useSidebarState from '~/hooks/Nav/useSidebarState';
-import { DEFAULT_PANEL, MEMORY_PANE_ID, useActivePanel } from '~/Providers';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 
@@ -60,12 +61,9 @@ type DocumentStatus = keyof typeof DOCUMENT_STATUS;
 type PendingUpload = { file: File; status: DocumentStatus };
 
 type TreeNode = {
-  name: string;
   path: string;
   type: 'dir' | 'file';
   children?: TreeNode[];
-  status?: 'indexed' | 'text_only' | 'pending' | 'error';
-  error?: string;
 };
 type SearchHit = {
   path: string;
@@ -141,18 +139,9 @@ const STATUS: Record<string, { cls: string; label: string }> = {
   excluded: { cls: 'bg-border-heavy', label: 'Excluded from search' },
 };
 
-function countFiles(n?: TreeNode): { total: number; indexed: number; pending: number } {
-  const acc = { total: 0, indexed: 0, pending: 0 };
-  const walk = (x: TreeNode) => {
-    if (x.type === 'file') {
-      acc.total += 1;
-      if (x.status === 'indexed') acc.indexed += 1;
-      if (x.status === 'pending') acc.pending += 1;
-    }
-    x.children?.forEach(walk);
-  };
-  if (n) walk(n);
-  return acc;
+function folderPaths(node: TreeNode): string[] {
+  if (node.type === 'file') return [];
+  return [...(node.path ? [node.path] : []), ...(node.children ?? []).flatMap(folderPaths)];
 }
 
 /* ------------------------------------------------------------------ UI helpers */
@@ -571,6 +560,15 @@ function folderLabel(path: string) {
   return path === top ? FOLDER_LABEL[top] ?? top : path.split('/').slice(-1)[0];
 }
 
+function folderPathLabel(path: string) {
+  const [top, ...children] = path.split('/');
+  return [folderLabel(top), ...children].join(' › ');
+}
+
+function acceptsUploads(path: string) {
+  return path !== '_guides' && !path.startsWith('_guides/');
+}
+
 function groupOf(d: Doc, g: GroupKey): string {
   if (g === 'typ') return d.typ;
   if (g === 'person') return d.person || 'No person';
@@ -645,6 +643,11 @@ export default function KnowledgePanel() {
   const fileInput = useRef<HTMLInputElement>(null);
   const viewer = useRef<HTMLIFrameElement>(null);
   const listScroll = useRef<HTMLDivElement>(null);
+  const { data: directories, refetch: loadFolders } = useQuery(
+    [QueryKeys.memoryFolders, KB_URL],
+    () => kb<TreeNode>('/api/tree'),
+    { select: folderPaths, retry: false },
+  );
 
   useLayoutEffect(() => {
     if (listScroll.current) listScroll.current.scrollTop = 0;
@@ -718,6 +721,7 @@ export default function KnowledgePanel() {
 
   const folders = useMemo(() => {
     const set = new Map<string, number>();
+    for (const path of directories ?? []) set.set(path, 0);
     for (const d of all) {
       const parts = d.folder.split('/');
       for (let i = 1; i <= parts.length; i++) {
@@ -728,7 +732,7 @@ export default function KnowledgePanel() {
     for (const t of TOP) if (!set.has(t)) set.set(t, 0);
     const order = (f: string) => TOP.indexOf(f.split('/')[0]);
     return [...set.entries()].sort((a, b) => order(a[0]) - order(b[0]) || a[0].localeCompare(b[0]));
-  }, [all]);
+  }, [all, directories]);
 
   const inFolder = useMemo(
     () => all.filter((d) => !folder || d.folder === folder || d.folder.startsWith(`${folder}/`)),
@@ -763,7 +767,7 @@ export default function KnowledgePanel() {
     total: all.length,
     indexed: all.filter((d) => d.status === 'indexed').length,
   };
-  const target = folder && !folder.startsWith('_guides') ? folder : 'files';
+  const target = folder && acceptsUploads(folder) ? folder : 'files';
 
   const chooseFiles = (files: FileList) => {
     const chosen = Array.from(files);
@@ -778,12 +782,11 @@ export default function KnowledgePanel() {
     setDialog('upload');
   };
 
-  const upload = async () => {
+  const upload = async (fd: FormData) => {
+    if (busy || !fd.get('folder') || !uploads.length) return;
     setBusy(localize('com_ui_memory_uploading'));
     setUploadError('');
     try {
-      const fd = new FormData();
-      fd.append('folder', target);
       uploads.forEach(({ file, status }) => {
         fd.append('files', file);
         fd.append('document_statuses', status);
@@ -792,7 +795,16 @@ export default function KnowledgePanel() {
       await load();
       setDialog(null);
       setUploads([]);
-      if (res.saved[0]) setSelected({ path: res.saved[0] });
+      const [path] = res.saved;
+      if (path) {
+        setFolder(path.slice(0, path.lastIndexOf('/')));
+        setTyp('');
+        setPerson('');
+        setQuery('');
+        setHits(null);
+        setSelected({ path });
+        listScroll.current?.scrollTo({ top: 0 });
+      }
     } catch (e) {
       setUploadError((e as Error).message);
     } finally {
@@ -829,8 +841,8 @@ export default function KnowledgePanel() {
     if (!name?.trim()) return;
     try {
       const res = await kb<{ path: string }>('/api/folder', json('POST', { path: `${parent}/${name.trim()}` }));
+      await Promise.all([loadFolders(), load()]);
       setFolder(res.path);
-      await load();
     } catch (e) {
       setError(String((e as Error).message));
     }
@@ -868,7 +880,7 @@ export default function KnowledgePanel() {
           <span>· {fmtDate(d.datum)}</span>
         </span>
         <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-text-tertiary">
-          <span className="truncate">{d.folder}</span>
+          {d.folder && <span className="truncate">{folderPathLabel(d.folder)}</span>}
           {d.tags.slice(0, 3).map((t) => (
             <span key={t} className="rounded-full border border-border-light px-1.5">#{t}</span>
           ))}
@@ -942,7 +954,7 @@ export default function KnowledgePanel() {
           <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-text-tertiary" />
           <input
             className={cn(inputCls, 'pl-8 pr-8')}
-            placeholder={folder ? `Search in “${folderLabel(folder)}” …` : 'Search all knowledge …'}
+            placeholder={folder ? `Search in “${folderPathLabel(folder)}” …` : 'Search all knowledge …'}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             autoFocus
@@ -1036,7 +1048,7 @@ export default function KnowledgePanel() {
               <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-light px-4 py-2 text-xs text-text-secondary">
                 <span className="mr-auto">
                   {filtered.length} document{filtered.length === 1 ? '' : 's'}
-                  {folder && ` in “${folderLabel(folder)}”`}
+                  {folder && ` in “${folderPathLabel(folder)}”`}
                   {typ && ` · ${typ}`}
                   {person && ` · ${person}`}
                 </span>
@@ -1125,7 +1137,7 @@ export default function KnowledgePanel() {
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold text-text-primary">{sel?.title ?? selected.path}</div>
                 <div className="truncate text-[11px] text-text-tertiary">
-                  {[sel?.typ, sel?.person && `${sel.person}${sel.rolle ? ` (${sel.rolle})` : ''}`, sel?.datum && fmtDate(sel.datum), sel?.ort].filter(Boolean).join(' · ')}
+                  {[sel?.folder && folderPathLabel(sel.folder), sel?.typ, sel?.person && `${sel.person}${sel.rolle ? ` (${sel.rolle})` : ''}`, sel?.datum && fmtDate(sel.datum), sel?.ort].filter(Boolean).join(' · ')}
                 </div>
               </div>
               {sel && (
@@ -1151,14 +1163,28 @@ export default function KnowledgePanel() {
       {dragging && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-black/40">
           <div className="rounded-xl border-2 border-dashed border-white px-8 py-6 text-lg font-medium text-white">
-            Drop files here → {target}/
+            Drop files here → {folderPathLabel(target)}
           </div>
         </div>
       )}
 
       {dialog === 'upload' && (
         <Modal title={localize('com_ui_upload_files')} onClose={() => !busy && setDialog(null)}>
-          <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void upload(); }}>
+          <form
+            className="flex flex-col gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void upload(new FormData(event.currentTarget));
+            }}
+          >
+            <label className="flex flex-col gap-1 text-xs font-medium text-text-secondary">
+              <span>{localize('com_ui_memory_upload_folder')}</span>
+              <select name="folder" className={inputCls} defaultValue={target} disabled={!!busy}>
+                {folders.filter(([path]) => acceptsUploads(path)).map(([path]) => (
+                  <option key={path} value={path}>{folderPathLabel(path)}</option>
+                ))}
+              </select>
+            </label>
             <p className="text-xs text-text-secondary">{localize('com_ui_memory_upload_constraints')}</p>
             <div className="grid grid-cols-[minmax(0,1fr)_8rem] gap-3 text-xs font-semibold text-text-secondary">
               <span>{localize('com_ui_memory_file_name')}</span>
