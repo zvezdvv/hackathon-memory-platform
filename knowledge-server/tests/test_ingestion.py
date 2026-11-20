@@ -8,7 +8,7 @@ from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import httpx
 
-from app import pdf
+from app import ai, pdf
 
 storage = importlib.import_module("app.store")
 
@@ -91,6 +91,57 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.store.search("Streusalz Cookie-Richtlinie"))["results"], [])
         self.store._rag.return_value = httpx.Response(200, json=[[chunk, 0.52]])
         self.assertEqual((await self.store.search("deicing supply"))["results"][0]["path"], path)
+
+    async def test_mcp_search_reranks_twelve_candidates_and_returns_six(self):
+        from app import mcp_tools
+
+        paths = await self.store.save_uploads("files", [
+            (f"source-{index}.txt", b"Document text.", "active") for index in range(13)
+        ])
+        passages = [f"Passage {index}: " + "chunk text " * 110 for index in range(13)]
+        for entry in self.store.entries.values():
+            entry.update(status="indexed", search_text_version=storage.SEARCH_TEXT_VERSION)
+        self.store._rag = AsyncMock(return_value=httpx.Response(200, json=[
+            [
+                {"metadata": {"file_id": storage.file_id_for(path)}, "page_content": passage},
+                0.3,
+            ]
+            for path, passage in zip(paths, passages)
+        ]))
+
+        ranking = [11, 7, 3, 9, 0, 1]
+
+        def respond(request):
+            self.assertEqual(str(request.url), "https://openrouter.ai/api/v1/rerank")
+            payload = json.loads(request.content)
+            self.assertEqual(payload["model"], "cohere/rerank-4-fast")
+            self.assertEqual(payload["query"], "winter salt")
+            self.assertEqual(payload["documents"], [passage.strip() for passage in passages[:12]])
+            self.assertEqual(payload["top_n"], 6)
+            return httpx.Response(200, json={"results": [{"index": i} for i in ranking]})
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        with (
+            patch.object(mcp_tools, "store", self.store),
+            patch.object(ai, "OPENROUTER_KEY", "test-key"),
+            patch.object(ai.httpx, "AsyncClient", return_value=client),
+        ):
+            response = await mcp_tools.search_knowledge("winter salt", max_results=12)
+        self.assertIn("6 results", response)
+        sources = [line for line in response.splitlines() if "Source (" in line]
+        self.assertEqual(len(sources), len(ranking))
+        for line, index in zip(sources, ranking):
+            self.assertIn(f"[{paths[index]}](", line)
+
+    async def test_reranker_failure_keeps_the_first_results(self):
+        response = httpx.Response(503)
+        client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: response))
+        with (
+            patch.object(ai, "OPENROUTER_KEY", "test-key"),
+            patch.object(ai.httpx, "AsyncClient", return_value=client),
+            self.assertLogs("knowledge", "WARNING"),
+        ):
+            self.assertEqual(await ai.rerank("winter salt", ["first", "second", "third"], 2), [0, 1])
 
     async def test_reindexes_clean_search_text_and_preserves_source_metadata(self):
         source = (

@@ -1,8 +1,9 @@
-"""Voice notes: transcription (ElevenLabs Scribe v2) and LLM structuring via OpenRouter."""
+"""OpenRouter calls for voice notes and knowledge retrieval."""
 
 from __future__ import annotations
 
 import json
+import logging
 import os
 
 import httpx
@@ -12,8 +13,10 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_KEY = os.getenv("OPENROUTER_KEY", "")
 TRANSCRIBE_MODEL = os.getenv("TRANSCRIBE_MODEL", "elevenlabs/scribe-v2")
 STRUCTURE_MODEL = os.getenv("STRUCTURE_MODEL", "openai/gpt-6-luna")
+RERANK_MODEL = "cohere/rerank-4-fast"
 # Empty = same language as the input (default). Set e.g. "English" to force a language.
 NOTE_LANGUAGE = os.getenv("NOTE_LANGUAGE", "")
+log = logging.getLogger("knowledge")
 
 
 def enabled() -> bool:
@@ -22,6 +25,34 @@ def enabled() -> bool:
 
 def _headers() -> dict:
     return {"Authorization": f"Bearer {OPENROUTER_KEY}"}
+
+
+async def rerank(query: str, documents: list[str], top_n: int) -> list[int]:
+    """Return ranked candidate indices, falling back to the original order on failure."""
+    limit = min(top_n, len(documents))
+    fallback = list(range(limit))
+    if len(documents) < 2 or not enabled():
+        return fallback
+
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            response = await client.post(
+                f"{OPENROUTER_URL}/rerank",
+                headers=_headers(),
+                json={"model": RERANK_MODEL, "query": query, "documents": documents, "top_n": limit},
+            )
+        response.raise_for_status()
+        indices = [result["index"] for result in response.json()["results"]]
+        if (
+            len(indices) != limit
+            or any(type(i) is not int or not 0 <= i < len(documents) for i in indices)
+            or len(set(indices)) != limit
+        ):
+            raise ValueError("Invalid rerank indices")
+        return indices
+    except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+        log.warning("Reranking failed (%s); using retrieval order", type(error).__name__)
+        return fallback
 
 
 async def transcribe(data: bytes, filename: str, mime: str) -> str:

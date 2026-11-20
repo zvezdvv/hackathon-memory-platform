@@ -5,6 +5,9 @@ from mcp.server.fastmcp import FastMCP
 
 from .store import DocumentStatus, GUIDE_FOLDER, rel, safe_path, slugify, split_frontmatter, store, view_url
 
+SEARCH_CANDIDATES = 12
+SEARCH_RESULT_LIMIT = 6
+
 INSTRUCTIONS = """Smart City knowledge base (file system + RAG search).
 
 Folders:
@@ -59,15 +62,20 @@ def _fmt_hits(res: dict) -> str:
 
 
 @mcp.tool()
-async def search_knowledge(query: str, folder: str = "", max_results: int = 6) -> str:
+async def search_knowledge(query: str, folder: str = "", max_results: int = SEARCH_RESULT_LIMIT) -> str:
     """Searches active documents for candidate passages. Verify relevance before using them.
 
     Args:
         query: Question or search terms in natural language (German terms work best).
         folder: Optionally search only in this folder, e.g. "interviews/klaus-behrens" or "files".
-        max_results: Number of results (1-12).
+        max_results: Number of reranked passages to return (1-6).
     """
-    res = await store.search(query, folder, max(1, min(int(max_results), 12)))
+    res = await store.search(
+        query,
+        folder,
+        SEARCH_CANDIDATES,
+        rerank_limit=max(1, min(max_results, SEARCH_RESULT_LIMIT)),
+    )
     # Deliver newer versions (e.g. a follow-up talk that updates a note) in full and FIRST,
     # so the model does not miss them.
     newer: dict[str, dict] = {}

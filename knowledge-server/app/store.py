@@ -24,6 +24,7 @@ from urllib.parse import quote
 import httpx
 import jwt
 
+from . import ai
 from .pdf import EXTRACTION_VERSION, extract_pdf, pdf_page_count
 
 log = logging.getLogger("knowledge")
@@ -669,7 +670,16 @@ class KnowledgeStore:
         return updates, ids
 
     # ---- suchen
-    async def search(self, query: str, folder: str = "", k: int = 6, *, typ: str = "", person: str = "") -> dict:
+    async def search(
+        self,
+        query: str,
+        folder: str = "",
+        k: int = 6,
+        *,
+        typ: str = "",
+        person: str = "",
+        rerank_limit: int | None = None,
+    ) -> dict:
         folder = (folder or "").strip().strip("/")
         include_guides = folder == GUIDE_FOLDER or folder.startswith(GUIDE_FOLDER + "/") or typ == "Guide"
         filtered_paths = None
@@ -741,6 +751,9 @@ class KnowledgeStore:
         else:
             mode = "keyword"
             hits = keyword_hits[:k]
+        if rerank_limit is not None:
+            indices = await ai.rerank(query, [hit["snippet"] for hit in hits], rerank_limit)
+            hits = [hits[index] for index in indices if allowed(hits[index]["path"])]
         updates, ids = self.update_map() if hits else ({}, {})
         for h in hits:
             if ids.get(h["path"]):

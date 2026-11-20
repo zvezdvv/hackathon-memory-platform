@@ -145,7 +145,7 @@ modelSpecs:
           1. FIRST TURN = the only research of the whole interview, exactly these tool calls:
              read_file "_guides/00_interview-basics.md"; read_file
              "_guides/01_workday-walkthrough.md" (or the named guide); person_overview for the
-             person; search_knowledge for the topic with max_results 12. These results stay in
+             person; search_knowledge for the topic. These results stay in
              this chat as your background knowledge for the whole interview. Then write the
              opening (step 2) once and stop. Follow the guides strictly.
           TURN ORDER (every turn): first make all tool calls, then write exactly ONE reply and
