@@ -455,6 +455,7 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
 /* ------------------------------------------------------------------ Interview */
 
 function InterviewDialog({ onClose }: { onClose: () => void }) {
+  const localize = useLocalize();
   const [people, setPeople] = useState<Person[]>([]);
   const [guides, setGuides] = useState<Guide[]>([]);
   const [person, setPerson] = useState('');
@@ -501,8 +502,10 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
         </datalist>
         <label className="text-xs font-medium text-text-secondary">Topic</label>
         <input className={inputCls} placeholder="e.g. Black ice operations at night" value={topic} onChange={(e) => setTopic(e.target.value)} />
-        <label className="text-xs font-medium text-text-secondary">Guide</label>
-        <select className={inputCls} value={guide} onChange={(e) => setGuide(e.target.value)}>
+        <label htmlFor="kb-interview-guide" className="text-xs font-medium text-text-secondary">
+          {localize('com_ui_memory_interview_guide')}
+        </label>
+        <select id="kb-interview-guide" className={inputCls} value={guide} onChange={(e) => setGuide(e.target.value)}>
           {guides.map((g) => <option key={g.path} value={g.path}>{g.title}</option>)}
           <option value="">Basic rules only</option>
         </select>
@@ -632,8 +635,7 @@ export default function KnowledgePanel() {
   const [sort, setSort] = useState<SortKey>('newest');
   const [group, setGroup] = useState<GroupKey>('none');
   const [query, setQuery] = useState('');
-  const [hits, setHits] = useState<SearchHit[] | null>(null);
-  const [searching, setSearching] = useState(false);
+  const [hits, setHits] = useState<SearchHit[] | 'error' | null>(null);
   const [selected, setSelected] = useState<{ path: string; hl?: string } | null>(null);
   const [dialog, setDialog] = useState<'upload' | 'speech' | 'interview' | null>(null);
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
@@ -694,31 +696,35 @@ export default function KnowledgePanel() {
   }, []);
 
   // Search (debounced)
+  const searchQuery = query.trim();
   useEffect(() => {
-    const q = query.trim();
-    if (!q) {
-      setHits(null);
-      return;
-    }
-    setSearching(true);
+    setHits(null);
+    if (!searchQuery) return;
+
+    const controller = new AbortController();
+    const params = new URLSearchParams({ q: searchQuery, k: '12', folder, typ, person });
     const t = window.setTimeout(async () => {
       try {
         const res = await kb<{ results: SearchHit[] }>(
-          `/api/search?q=${encodeURIComponent(q)}&k=12${folder ? `&folder=${encodeURIComponent(folder)}` : ''}`,
+          `/api/search?${params}`,
+          { signal: controller.signal },
         );
-        setHits(res.results);
+        if (!controller.signal.aborted) setHits(res.results);
       } catch {
-        setHits([]);
-      } finally {
-        setSearching(false);
+        if (!controller.signal.aborted) setHits('error');
       }
     }, 350);
-    return () => window.clearTimeout(t);
-  }, [query, folder]);
+    return () => {
+      window.clearTimeout(t);
+      controller.abort();
+    };
+  }, [searchQuery, folder, typ, person]);
 
   const all = docs ?? [];
   const byPath = useMemo(() => new Map(all.map((d) => [d.path, d])), [all]);
-  const visibleHits = hits?.filter((hit) => (byPath.get(hit.path)?.document_status ?? 'active') === 'active');
+  const visibleHits = Array.isArray(hits)
+    ? hits.filter((hit) => (byPath.get(hit.path)?.document_status ?? 'active') === 'active')
+    : [];
 
   const folders = useMemo(() => {
     const set = new Map<string, number>();
@@ -1041,7 +1047,7 @@ export default function KnowledgePanel() {
 
         {/* Liste */}
         <main className={cn('min-h-0 min-w-0 flex-col overflow-hidden', selected ? 'hidden w-[22rem] flex-none md:flex' : 'flex flex-1')}>
-          {!visibleHits ? (
+          {!searchQuery ? (
             <>
               <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-light px-4 py-2 text-xs text-text-secondary">
                 <span className="mr-auto">
@@ -1090,7 +1096,13 @@ export default function KnowledgePanel() {
             </>
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <p className="mb-3 text-xs text-text-secondary">{searching ? 'Searching …' : `${visibleHits.length} passages for “${query}”`}</p>
+              <p role="status" className="mb-3 text-xs text-text-secondary">
+                {hits === null && localize('com_ui_memory_searching')}
+                {hits === 'error' && localize('com_ui_memory_search_error')}
+                {Array.isArray(hits) && (visibleHits.length
+                  ? localize('com_ui_memory_search_passages', { 0: String(visibleHits.length), 1: searchQuery })
+                  : localize('com_ui_no_search_results'))}
+              </p>
               <div className="flex flex-col gap-2">
                 {visibleHits.map((h, i) => {
                   const d = byPath.get(h.path);

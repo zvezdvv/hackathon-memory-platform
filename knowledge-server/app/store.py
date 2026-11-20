@@ -41,6 +41,9 @@ OWNER_ID = "smart-city-knowledge"
 # Changes when the embedding model/collection changes; then everything is re-embedded once.
 INDEX_VERSION = os.getenv("INDEX_VERSION", "")
 VERSION_FILE = STATE / "index_version"
+# pgvector cosine distance. Lexical matches still qualify independently.
+SEARCH_MAX_DISTANCE = float(os.getenv("KNOWLEDGE_SEARCH_MAX_DISTANCE", "0.65"))
+SEARCH_TEXT_VERSION = 1
 
 TOP_FOLDERS = ["files", "speech", "interviews", "_guides"]
 TEXT_EXT = {".md", ".markdown", ".txt", ".csv", ".json", ".yaml", ".yml"}
@@ -55,6 +58,11 @@ STOPWORDS = set(
     "warum mit von für fur auf aus bei den dem des im in zu zum zur nicht auch noch nur über "
     "uber dass es sie er wir ich du ihr man sich hat haben wird werden kann können konnen "
     "the and for with what who how".split()
+)
+WEB_EXPORT_FOOTER = re.compile(
+    r"^[ \t]*-->[ \t]*\n[ \t]*Feedback[ \t]*\n[ \t]*-->[ \t]*\n"
+    r"[ \t]*Verwendung von Cookies\..*?(?=^[ \t]*---[ \t]*$|^#{1,6}[ \t]|\Z)",
+    re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
 
 
@@ -153,6 +161,11 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
             meta[last] = (meta[last] + " " + line.strip()[2:].strip('"')).strip()
     body = text[end + 4 :].lstrip("\n")
     return meta, body
+
+
+def search_body(body: str) -> str:
+    # This export appends site controls between the law text and the next extract.
+    return WEB_EXPORT_FOOTER.sub("\n", body)
 
 
 def validate_upload(filename: str, data: bytes) -> None:
@@ -263,6 +276,12 @@ class KnowledgeStore:
             return "excluded"
         if Path(path).suffix.lower() == ".pdf" and entry.get("pdf_version") != EXTRACTION_VERSION:
             return "error" if entry.get("status") == "error" else "pending"
+        if (
+            entry.get("status") == "indexed"
+            and Path(path).suffix.lower() in EDITABLE_EXT
+            and entry.get("search_text_version") != SEARCH_TEXT_VERSION
+        ):
+            return "pending"
         return entry.get("status", "pending")
 
     def pdf_progress(self, path: str) -> dict:
@@ -357,7 +376,8 @@ class KnowledgeStore:
         p = ROOT / relpath
         data = p.read_bytes()
         filename = p.name
-        pdf = p.suffix.lower() == ".pdf"
+        ext = p.suffix.lower()
+        pdf = ext == ".pdf"
         cache = TEXT_CACHE / f"{entry['id']}.txt"
         entry["was_indexed"] = entry.get("status") == "indexed" or entry.get("was_indexed", False)
         entry["status"] = "pending"
@@ -381,8 +401,14 @@ class KnowledgeStore:
                     text = await extract_pdf(data, on_progress=on_progress)
                 data = text.encode("utf-8")
                 filename = f"{p.stem}.txt"
-            elif p.suffix.lower() in TEXT_EXT:
-                text = data.decode("utf-8", errors="replace")
+            elif ext in TEXT_EXT:
+                text = data.decode("utf-8-sig", errors="replace").replace("\r\n", "\n")
+                if ext in EDITABLE_EXT:
+                    meta, body = split_frontmatter(text)
+                    cleaned = search_body(body if meta else text)
+                    if cleaned != text:
+                        data = cleaned.encode("utf-8")
+                        filename = f"{p.stem}.txt"
             else:
                 r = await self._rag(
                     "POST", "/text", data={"file_id": entry["id"]}, files={"file": (p.name, data)}
@@ -413,6 +439,10 @@ class KnowledgeStore:
                     deleted.raise_for_status()
             if not self.is_active(relpath):
                 return
+            if ext in EDITABLE_EXT and not data.strip():
+                entry["status"] = "text_only"
+                entry.pop("was_indexed", None)
+                return
             # The write may succeed even if its response is lost. Clear it before a retry.
             entry["was_indexed"] = True
             self._save()
@@ -422,6 +452,8 @@ class KnowledgeStore:
             body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
             if r.status_code < 300 and (not isinstance(body, dict) or body.get("status", True)):
                 entry["status"] = "indexed"
+                if ext in EDITABLE_EXT:
+                    entry["search_text_version"] = SEARCH_TEXT_VERSION
                 entry.pop("was_indexed", None)
                 entry["error"] = ""
                 self.rag_ok, self.rag_error = True, ""
@@ -637,11 +669,20 @@ class KnowledgeStore:
         return updates, ids
 
     # ---- suchen
-    async def search(self, query: str, folder: str = "", k: int = 6) -> dict:
+    async def search(self, query: str, folder: str = "", k: int = 6, *, typ: str = "", person: str = "") -> dict:
         folder = (folder or "").strip().strip("/")
-        include_guides = folder.startswith(GUIDE_FOLDER)
+        include_guides = folder == GUIDE_FOLDER or folder.startswith(GUIDE_FOLDER + "/") or typ == "Guide"
+        filtered_paths = None
+        if typ or person:
+            filtered_paths = {
+                doc["path"]
+                for doc in self.documents()
+                if (not typ or doc["typ"] == typ) and (not person or doc["person"] == person)
+            }
 
         def allowed(relpath: str) -> bool:
+            if filtered_paths is not None and relpath not in filtered_paths:
+                return False
             if folder and not (relpath == folder or relpath.startswith(folder + "/")):
                 return False
             if not include_guides and relpath.startswith(GUIDE_FOLDER + "/"):
@@ -663,13 +704,15 @@ class KnowledgeStore:
                         doc, score = (item[0], item[1]) if isinstance(item, list) else (item, None)
                         meta = doc.get("metadata", {}) or {}
                         path = by_id.get(meta.get("file_id"))
-                        if not path or not allowed(path):
+                        if not path or not allowed(path) or score is None or float(score) > SEARCH_MAX_DISTANCE:
+                            continue
+                        snippet = doc.get("page_content", "").strip()
+                        if not snippet:
                             continue
                         hits.append(
                             {
                                 "path": path,
-                                "snippet": doc.get("page_content", "").strip(),
-                                "score": round(1 - float(score), 3) if score is not None else None,
+                                "snippet": snippet,
                                 "page": meta.get("page"),
                             }
                         )
@@ -698,7 +741,7 @@ class KnowledgeStore:
         else:
             mode = "keyword"
             hits = keyword_hits[:k]
-        updates, ids = self.update_map()
+        updates, ids = self.update_map() if hits else ({}, {})
         for h in hits:
             if ids.get(h["path"]):
                 h["doc_id"] = ids[h["path"]]
@@ -725,6 +768,7 @@ class KnowledgeStore:
             except Exception:  # noqa: BLE001
                 continue
             meta, body = split_frontmatter(text)
+            body = search_body(body)
             # Treffer im Dateinamen/Titel/Tags zählen extra (kurze Notizen sind sonst benachteiligt)
             head = (path + " " + " ".join(meta.values())).lower()
             head_bonus = sum(3 for t in terms if t in head)

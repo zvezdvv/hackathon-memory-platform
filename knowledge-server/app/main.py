@@ -150,8 +150,8 @@ async def delete_item(path: str):
 
 
 @app.get("/api/search")
-async def search(q: str, folder: str = "", k: int = Query(8, ge=1, le=20)):
-    return await store.search(q, folder, k)
+async def search(q: str, folder: str = "", k: int = Query(8, ge=1, le=20), typ: str = "", person: str = ""):
+    return await store.search(q, folder, k, typ=typ, person=person)
 
 
 class Note(BaseModel):

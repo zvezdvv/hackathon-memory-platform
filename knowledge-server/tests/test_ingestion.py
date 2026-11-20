@@ -42,6 +42,7 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         ])
         for entry in self.store.entries.values():
             entry["status"] = "indexed"
+            entry["search_text_version"] = storage.SEARCH_TEXT_VERSION
         self.store._save()
 
         restarted = storage.KnowledgeStore()
@@ -59,6 +60,63 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         restarted.set_status(active, "inactive")
         result = await restarted.search("Winterdienst")
         self.assertEqual({hit["path"] for hit in result["results"]}, {draft})
+
+    async def test_search_filters_both_retrieval_paths_before_ranking(self):
+        first, second, law = await self.store.save_uploads("files", [
+            ("first.md", b"---\ntyp: note\nautor: Lina (Dispatcher)\n---\n\nRoad salt container.", "active"),
+            ("second.md", b"---\ntyp: note\nautor: Max\n---\n\nRoad salt order.", "active"),
+            ("law.md", b"---\ngesetz: Winter rules\nautor: Lina\n---\n\nRoad salt rules.", "active"),
+        ])
+        for entry in self.store.entries.values():
+            entry.update(status="indexed", search_text_version=storage.SEARCH_TEXT_VERSION)
+        self.store._rag = AsyncMock(return_value=httpx.Response(200, json=[
+            [{"metadata": {"file_id": storage.file_id_for(path)}, "page_content": "Road salt"}, 0.25]
+            for path in (second, law, first)
+        ]))
+        response = await self.store.search("road salt", "files", 1, typ="Note", person="Lina")
+        self.assertEqual([hit["path"] for hit in response["results"]], [first])
+        self.assertEqual(self.store._rag.call_args.kwargs["json"]["file_ids"], [storage.file_id_for(first)])
+        self.store._rag.return_value = httpx.Response(503)
+        response = await self.store.search("road salt", typ="Law", person="Lina")
+        self.assertEqual([hit["path"] for hit in response["results"]], [law])
+
+    async def test_search_keeps_semantic_and_exact_matches_but_rejects_weak_candidates(self):
+        [path] = await self.store.save_uploads("files", [("salt.txt", b"Streusalz: ID ZX730.", "active")])
+        self.store.entries[path].update(status="indexed", search_text_version=storage.SEARCH_TEXT_VERSION)
+        chunk = {"metadata": {"file_id": storage.file_id_for(path)}, "page_content": "Streusalz: ID ZX730."}
+        self.store._rag = AsyncMock(return_value=httpx.Response(200, json=[[chunk, 0.74]]))
+        self.assertEqual((await self.store.search("zzqaunmatchable792orvb"))["results"], [])
+        self.assertEqual((await self.store.search("ZX730"))["mode"], "keyword")
+        self.store._rag.return_value = httpx.Response(200, json=[[chunk, 0.52]])
+        self.assertEqual((await self.store.search("deicing supply"))["results"][0]["path"], path)
+
+    async def test_reindexes_clean_search_text_and_preserves_source_metadata(self):
+        source = (
+            "---\ntitle: Street Act\nautor: Lina\n---\n\n# First section\n\nOriginal rule.\n"
+            " -->\n Feedback\n-->\n Verwendung von Cookies.\n"
+            " Cookie-Richtlinie\n Akzeptieren\n Nachricht senden\n\n"
+            "---\n\n# Second section\n\nOrtsdurchfahrt.\n"
+        )
+        [path] = await self.store.save_uploads("files", [("law.md", source.encode(), "active")])
+        self.store.entries[path]["status"] = "indexed"
+        self.assertEqual(self.store.index_status(path, self.store.entries[path]), "pending")
+        self.store._rag = AsyncMock(return_value=httpx.Response(
+            200, json={"status": True}, request=httpx.Request("POST", "http://rag.test"),
+        ))
+        await self.store.sync()
+        self.assertEqual(self.store._rag.await_args_list[0].args, ("DELETE", "/documents"))
+        filename, indexed = self.store._rag.await_args.kwargs["files"]["file"]
+        self.assertEqual(filename, "law.txt")
+        self.assertIn(b"Original rule.", indexed)
+        self.assertIn(b"Ortsdurchfahrt.", indexed)
+        self.assertNotIn(b"Cookies", indexed)
+        self.assertNotIn(b"autor:", indexed)
+        self.assertEqual(self.store.get_text(path), source)
+        self.assertEqual(self.store.documents()[0]["title"], "Street Act")
+        self.assertEqual(self.store.index_status(path, self.store.entries[path]), "indexed")
+        self.store._rag.return_value = httpx.Response(404)
+        self.assertEqual((await self.store.search("Cookies"))["results"], [])
+        self.assertEqual((await self.store.search("Ortsdurchfahrt"))["results"][0]["path"], path)
 
     async def test_legacy_pdf_is_reprocessed_and_only_transcript_is_embedded(self):
         original = b"%PDF-1.7 original contents"
