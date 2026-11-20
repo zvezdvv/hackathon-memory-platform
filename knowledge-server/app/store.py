@@ -172,6 +172,7 @@ class KnowledgeStore:
     def __init__(self) -> None:
         self.entries: dict[str, dict] = {}
         self.document_statuses: dict[str, DocumentStatus] = {}
+        self._pdf_processing: dict[str, dict] = {}
         self.wake = asyncio.Event()
         self.rag_ok: bool | None = None
         self.rag_error: str = ""
@@ -264,6 +265,12 @@ class KnowledgeStore:
             return "error" if entry.get("status") == "error" else "pending"
         return entry.get("status", "pending")
 
+    def pdf_progress(self, path: str) -> dict:
+        status = self.index_status(path, self.entries.get(path, {}))
+        if status != "pending":
+            return {"status": status}
+        return {"status": status, **self._pdf_processing.get(path, {"phase": "queued"})}
+
     # ---- rag_api
     def _headers(self) -> dict:
         if not JWT_SECRET:
@@ -337,7 +344,10 @@ class KnowledgeStore:
         if changed:
             self._save()
         for relpath in todo:
-            await self._process(relpath)
+            try:
+                await self._process(relpath)
+            finally:
+                self._pdf_processing.pop(relpath, None)
             self._save()
 
     async def _process(self, relpath: str) -> None:
@@ -359,7 +369,16 @@ class KnowledgeStore:
                 if entry.get("pdf_version") == EXTRACTION_VERSION and cache.exists():
                     text = cache.read_text("utf-8")
                 else:
-                    text = await extract_pdf(data)
+                    self._pdf_processing[relpath] = {"phase": "rendering"}
+
+                    def on_progress(completed: int, total: int) -> None:
+                        self._pdf_processing[relpath] = {
+                            "phase": "extracting",
+                            "completed_pages": completed,
+                            "total_pages": total,
+                        }
+
+                    text = await extract_pdf(data, on_progress=on_progress)
                 data = text.encode("utf-8")
                 filename = f"{p.stem}.txt"
             elif p.suffix.lower() in TEXT_EXT:
@@ -382,6 +401,7 @@ class KnowledgeStore:
         cache.write_text(text, "utf-8")
         if pdf:
             entry["pdf_version"] = EXTRACTION_VERSION
+            self._pdf_processing[relpath] = {"phase": "indexing"}
         if not self.is_active(relpath):
             return
 

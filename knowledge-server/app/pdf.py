@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -115,17 +116,23 @@ async def transcribe_page(client: httpx.AsyncClient, image: bytes, page: int) ->
     return text
 
 
-async def extract_pdf(data: bytes) -> str:
+async def extract_pdf(
+    data: bytes, *, on_progress: Callable[[int, int], None] | None = None,
+) -> str:
     key = os.getenv("OPENROUTER_KEY", "")
     if not key or key == "user_provided":
         raise RuntimeError("OpenRouter PDF processing is not configured")
     images = await asyncio.to_thread(render_pages, data)
+    if on_progress:
+        on_progress(0, len(images))
     sections = []
     async with httpx.AsyncClient(timeout=120, headers={"Authorization": f"Bearer {key}"}) as client:
         for page, image in enumerate(images, start=1):
             text = await transcribe_page(client, image, page)
             if text.casefold() != BLANK_PAGE:
                 sections.append(f"## Page {page}\n\n{text}")
+            if on_progress:
+                on_progress(page, len(images))
     if not sections:
         raise RuntimeError("The PDF has no readable text")
     return "\n\n".join(sections)

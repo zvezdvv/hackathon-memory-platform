@@ -14,7 +14,7 @@ import jwt
 import markdown
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from . import ai
@@ -264,6 +264,8 @@ table{border-collapse:collapse}th,td{border:1px solid var(--border);padding:4px 
 textarea{width:100%;min-height:70vh;background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:10px;font:13px/1.5 ui-monospace,monospace}
 iframe.pdf{width:100%;height:80vh;border:1px solid var(--border);border-radius:8px}
 .tabs{display:flex;gap:6px;margin-bottom:12px}.tabs .on{border-color:var(--accent);color:var(--accent)}
+.processing{display:grid;gap:8px;margin-bottom:16px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--card)}
+.processing progress{width:100%;accent-color:var(--accent)}
 .hidden{display:none}
 """
 
@@ -278,7 +280,42 @@ if(hl){const H=norm(hl);const head=H.slice(0,50);let first=null;
  if(first){const go=()=>window.scrollTo(0,first.getBoundingClientRect().top+window.scrollY-140);setTimeout(go,100);setTimeout(go,600);}
 }
 function tab(n){document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('hidden',e.dataset.tab!==n));
- document.querySelectorAll('.tabs .btn').forEach(b=>b.classList.toggle('on',b.dataset.t===n));}
+ document.querySelectorAll('.tabs .btn').forEach(b=>b.classList.toggle('on',b.dataset.t===n));
+ history.replaceState(null,'',n==='orig'?'#original':location.pathname+location.search);}
+if(location.hash==='#original'&&document.querySelector('[data-tab="orig"]'))tab('orig');
+function watchPdfProcessing(){
+ const panel=document.getElementById('pdf-processing');
+ if(!panel)return;
+ const message=panel.querySelector('[role="status"]');
+ const bar=panel.querySelector('progress');
+ async function poll(){
+  try{
+   const res=await fetch('api/pdf-progress?path='+encodeURIComponent(PATH),{cache:'no-store'});
+   if(res.status===404){
+    message.textContent='This PDF is no longer available.';
+    bar.hidden=true;
+    return;
+   }
+   if(res.ok){
+    const state=await res.json();
+    if(state.status!=='pending'||(state.phase==='indexing'&&panel.dataset.textReady==='false')){
+     location.reload();
+     return;
+    }
+    if(message.textContent!==state.message)message.textContent=state.message;
+    if(state.phase==='extracting'){
+     bar.max=state.total_pages;
+     bar.value=state.completed_pages;
+    }else bar.removeAttribute('value');
+   }
+  }catch{
+   // Keep the previous stage visible during a temporary connection failure.
+  }
+  setTimeout(poll,2000);
+ }
+ setTimeout(poll,2000);
+}
+watchPdfProcessing();
 function parentToken(){return new Promise(res=>{if(window.parent===window)return res('');
  const origin=document.referrer?new URL(document.referrer).origin:location.origin;
  function receive(e){if(e.origin===origin&&e.source===window.parent&&e.data?.type==='kb-token'){
@@ -315,6 +352,35 @@ STATUS_LABEL = {
     "excluded": "Excluded from search",
 }
 
+PDF_PROCESSING_LABEL = {
+    "queued": "Waiting to process PDF…",
+    "rendering": "Preparing PDF pages…",
+    "indexing": "Text extracted. Indexing for search…",
+}
+
+
+def _pdf_progress(path: str) -> dict:
+    progress = store.pdf_progress(path)
+    if progress["status"] != "pending":
+        return progress
+    phase = progress["phase"]
+    if phase == "extracting":
+        message = (
+            f"Extracting PDF text… {progress['completed_pages']} of "
+            f"{progress['total_pages']} pages processed."
+        )
+    else:
+        message = PDF_PROCESSING_LABEL[phase]
+    return {**progress, "message": message}
+
+
+@app.get("/api/pdf-progress")
+def pdf_progress(path: str):
+    p = _guard(lambda: safe_path(path))
+    if p.suffix.lower() != ".pdf" or not p.is_file():
+        raise HTTPException(404, "PDF not found")
+    return JSONResponse(_pdf_progress(rel(p)), headers={"Cache-Control": "no-store"})
+
 
 def _render_md(text: str) -> str:
     safe = text.replace("&", "&amp;").replace("<", "&lt;")
@@ -326,10 +392,11 @@ def view(path: str, hl: str = "", embed: int = 0):
     p = _guard(lambda: safe_path(path))
     if not p.is_file():
         raise HTTPException(404, "File not found")
-    entry = store.entries.get(rel(p), {})
-    status = store.index_status(rel(p), entry)
-    status_txt = STATUS_LABEL.get(status, "")
+    relative = rel(p)
     ext = p.suffix.lower()
+    progress = _pdf_progress(relative) if ext == ".pdf" else None
+    status = progress["status"] if progress else store.index_status(relative, store.entries.get(relative, {}))
+    status_txt = "⏳ processing PDF" if progress and status == "pending" else STATUS_LABEL.get(status, "")
     text_content = store.get_text(path)
     meta, body = split_frontmatter(text_content) if ext in (".md", ".markdown") else ({}, text_content)
 
@@ -377,7 +444,27 @@ def view(path: str, hl: str = "", embed: int = 0):
                     buf = ""
             if buf:
                 paras.append(buf)
-        body_html = "".join(f"<p>{html.escape(x)}</p>" for x in paras) or "<p><em>No text extracted.</em></p>"
+        body_html = "".join(f"<p>{html.escape(x)}</p>" for x in paras)
+        if not body_html and not (progress and status == "pending"):
+            if progress and status == "error":
+                message = "PDF text extraction failed. You can still open the original PDF."
+            elif progress and status == "excluded":
+                message = "Text extraction starts when this document is Active."
+            else:
+                message = "No text extracted."
+            body_html = f"<p><em>{message}</em></p>"
+
+    if progress and status == "pending":
+        pages = ""
+        if progress["phase"] == "extracting":
+            pages = f' max="{progress["total_pages"]}" value="{progress["completed_pages"]}"'
+        text_ready = "true" if body.strip() else "false"
+        body_html = (
+            f'<div class="processing" id="pdf-processing" data-text-ready="{text_ready}">'
+            f'<span role="status">{html.escape(progress["message"])}</span>'
+            f'<progress aria-label="PDF processing progress"{pages}></progress>'
+            f"</div>{body_html}"
+        )
 
     raw_url = f"api/raw?path={quote(path)}"
     content = f'<div id="content">{meta_html}{audio_html}{body_html}</div>'
@@ -405,6 +492,7 @@ def view(path: str, hl: str = "", embed: int = 0):
         )
 
     folder, _, name = path.rpartition("/")
+    script_path = json.dumps(path).replace("<", "\\u003c")
     page = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(name)}</title>
 <style>{VIEW_CSS}</style></head><body>
@@ -414,8 +502,8 @@ def view(path: str, hl: str = "", embed: int = 0):
 {'' if embed else f'<a class="btn" href="{html.escape(raw_url)}" download>Download</a>'}</header>
 <main><div id="hitbox" class="hitbox hidden"><strong>Passage:</strong> “<q></q>”</div>
 {tabs}{content}{editor}</main>
-<script>const PATH={json.dumps(path)};{VIEW_JS}</script></body></html>"""
-    return HTMLResponse(page)
+<script>const PATH={script_path};{VIEW_JS}</script></body></html>"""
+    return HTMLResponse(page, headers={"Cache-Control": "no-store"} if progress else None)
 
 
 # MCP (streamable HTTP) under /mcp – mounted last so the API routes take precedence

@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 import httpx
 
@@ -73,7 +73,7 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         ])
         with patch.object(storage, "extract_pdf", AsyncMock(return_value="Recognizable section § 3")) as extract:
             await self.store.sync()
-        extract.assert_awaited_once_with(original)
+        extract.assert_awaited_once_with(original, on_progress=ANY)
         self.assertEqual(self.store._rag.await_args_list[0].args, ("DELETE", "/documents"))
         self.assertEqual(
             self.store._rag.await_args.kwargs["files"]["file"],
@@ -122,6 +122,44 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(docs[interview]["ort"], "Rathaus")
         self.assertEqual((await self.store.search("Rathaus"))["results"], [])
 
+    async def test_pdf_view_tracks_processing_and_then_shows_the_transcript(self):
+        from app import main
+
+        with patch.object(storage, "pdf_page_count", return_value=2):
+            [path] = await self.store.save_uploads(
+                "files", [("sample.pdf", b"%PDF-1.7 sample", "active")],
+            )
+
+        def view() -> str:
+            return main.view(path).body.decode()
+
+        async def extract(data, *, on_progress):
+            self.assertIn("Preparing PDF pages", view())
+            on_progress(1, 2)
+            self.assertIn("1 of 2 pages processed", view())
+            self.assertIn('max="2" value="1"', view())
+            return "Recognizable PDF text."
+
+        async def embed(*args, **kwargs):
+            self.assertIn("Text extracted. Indexing for search", view())
+            self.assertIn("Recognizable PDF text.", view())
+            return httpx.Response(200, json={"status": True})
+
+        self.store._rag = embed
+        with patch.object(main, "store", self.store), patch.object(storage, "extract_pdf", extract):
+            self.assertIn("Waiting to process PDF", view())
+            self.assertNotIn("No text extracted.", view())
+            await self.store.sync()
+            self.assertIn("Recognizable PDF text.", view())
+            self.assertIn("indexed in RAG", view())
+            self.assertNotIn('id="pdf-processing"', view())
+
+            self.store.entries[path]["status"] = "error"
+            self.store.entries[path].pop("pdf_version")
+            self.assertIn("PDF text extraction failed.", view())
+            self.store.set_status(path, "draft")
+            self.assertIn("Text extraction starts when this document is Active.", view())
+
 
 class PdfPageTests(unittest.IsolatedAsyncioTestCase):
     def test_rejects_pdfs_over_ten_pages(self):
@@ -141,18 +179,20 @@ class PdfPageTests(unittest.IsolatedAsyncioTestCase):
             })
 
         client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        progress = Mock()
         with (
             patch.dict("os.environ", {"OPENROUTER_KEY": "test-key"}),
             patch.object(pdf, "render_pages", return_value=[b"ab", b"cd"]),
             patch.object(pdf.httpx, "AsyncClient", return_value=client),
         ):
             self.assertEqual(
-                await pdf.extract_pdf(b"%PDF-1.7"),
+                await pdf.extract_pdf(b"%PDF-1.7", on_progress=progress),
                 "## Page 1\n\nTranscription 1\n\n## Page 2\n\nTranscription 2",
             )
         self.assertEqual([item["model"] for item in requests], ["openai/gpt-6.1-terra"] * 2)
         inputs = [item["messages"][1]["content"][1]["image_url"]["url"] for item in requests]
         self.assertEqual(inputs, ["data:image/jpeg;base64,YWI=", "data:image/jpeg;base64,Y2Q="])
+        self.assertEqual([call.args for call in progress.call_args_list], [(0, 2), (1, 2), (2, 2)])
 
     async def test_refuses_truncated_page_output(self):
         def respond(request):
