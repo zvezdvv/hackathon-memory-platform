@@ -44,7 +44,8 @@ const ConversationsSection = memo(() => {
   const { setSidebarOpen } = useSidebarToggle();
   const { isAuthenticated } = useAuthContext();
   const { data: startupConfig } = useGetStartupConfig();
-  const showProjects = startupConfig?.interface?.sidebarProjects !== false;
+  const interfaceConfig = startupConfig?.interface;
+  const showProjects = interfaceConfig != null && interfaceConfig.sidebarProjects !== false;
   useTitleGeneration(isAuthenticated);
 
   const [isChatsExpanded, setIsChatsExpanded] = useLocalStorage('chatsExpanded', true);

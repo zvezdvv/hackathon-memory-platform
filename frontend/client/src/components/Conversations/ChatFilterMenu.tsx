@@ -794,7 +794,8 @@ const ChatFilterMenu = () => {
   const setSort = useSetAtom(chatSortAtom);
   const [showProjectChats, setShowProjectChats] = useAtom(showProjectChatsAtom);
   const { data: startupConfig } = useGetStartupConfig();
-  const showProjects = startupConfig?.interface?.sidebarProjects !== false;
+  const interfaceConfig = startupConfig?.interface;
+  const showProjects = interfaceConfig != null && interfaceConfig.sidebarProjects !== false;
   const resetFilters = useSetAtom(resetChatFiltersAtom);
   const resetAllFacets = useSetAtom(resetFacetsAtom);
 

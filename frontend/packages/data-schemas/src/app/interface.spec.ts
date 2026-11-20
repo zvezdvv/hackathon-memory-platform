@@ -88,6 +88,15 @@ describe('loadDefaultInterface', () => {
     expect(disabledInterface?.mascot).toBe(false);
   });
 
+  it('forwards the sidebar projects opt-out to the served interface', async () => {
+    const interfaceConfig = await loadDefaultInterface({
+      config: { interface: { sidebarProjects: false } },
+      configDefaults: getConfigDefaults(),
+    });
+
+    expect(interfaceConfig?.sidebarProjects).toBe(false);
+  });
+
   it('uses and preserves the schema default for the queued-send lock expiry', async () => {
     const configDefaults = getConfigDefaults();
     const defaultInterface = await loadDefaultInterface({
