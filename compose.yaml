@@ -92,6 +92,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Run deploy/init-env.sh}
       # Keep in sync with the backend's embedding model/collection; a change triggers re-embedding
       INDEX_VERSION: smartcity-voyage-4
+      # Voice notes: transcription (ElevenLabs Scribe v2) and structuring via OpenRouter
+      OPENROUTER_KEY: ${OPENROUTER_KEY:-}
+      TRANSCRIBE_MODEL: elevenlabs/scribe-v2
+      STRUCTURE_MODEL: openai/gpt-6-luna
     volumes:
       - ./knowledge:/data/knowledge
     networks: [edge, app]

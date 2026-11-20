@@ -227,108 +227,186 @@ function Viewer({ path, hl, onClose }: { path: string; hl?: string; onClose: () 
 
 /* ------------------------------------------------------------------ Speech */
 
-type SpeechRec = {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start: () => void;
-  stop: () => void;
-  onresult: ((e: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
-  onend: (() => void) | null;
-  onerror: ((e: { error: string }) => void) | null;
-};
+type SpeechResult = { path: string; transcript: string; structured: boolean; warning: string };
 
+function fmtSeconds(s: number) {
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Voice note: record (or upload) audio → server transcribes with ElevenLabs Scribe v2 →
+ * an LLM structures it and fills in the metadata → saved under speech/.
+ */
 function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (path: string) => void }) {
   const [title, setTitle] = useState('');
   const [person, setPerson] = useState('');
+  const [mode, setMode] = useState<'record' | 'type'>('record');
   const [text, setText] = useState('');
-  const [interim, setInterim] = useState('');
   const [recording, setRecording] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const [clip, setClip] = useState<Blob | null>(null);
+  const [clipUrl, setClipUrl] = useState('');
+  const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const recRef = useRef<SpeechRec | null>(null);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const chunks = useRef<Blob[]>([]);
+  const timer = useRef<number | undefined>(undefined);
+  const audioInput = useRef<HTMLInputElement>(null);
 
-  const Ctor = (window as unknown as Record<string, unknown>).SpeechRecognition ??
-    (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
-  const supported = typeof Ctor === 'function';
+  const supported = typeof window.MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
 
-  const start = () => {
-    if (!supported) return;
-    setError('');
-    const rec = new (Ctor as new () => SpeechRec)();
-    rec.lang = navigator.language || 'en-US';
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.onresult = (e) => {
-      let finalText = '';
-      let interimText = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (r.isFinal) finalText += r[0].transcript;
-        else interimText += r[0].transcript;
-      }
-      if (finalText) setText((t) => (t ? `${t.trimEnd()} ${finalText.trim()}` : finalText.trim()));
-      setInterim(interimText);
-    };
-    rec.onerror = (e) => setError(`Speech recognition: ${e.error}`);
-    rec.onend = () => {
-      setRecording(false);
-      setInterim('');
-    };
-    recRef.current = rec;
-    rec.start();
-    setRecording(true);
+  const setRecordedClip = (blob: Blob | null) => {
+    setClip(blob);
+    setClipUrl((old) => {
+      if (old) URL.revokeObjectURL(old);
+      return blob ? URL.createObjectURL(blob) : '';
+    });
   };
-  const stop = () => recRef.current?.stop();
-  useEffect(() => () => recRef.current?.stop(), []);
 
-  const save = async () => {
-    setSaving(true);
+  const start = async () => {
     setError('');
     try {
-      const res = await kb<{ path: string }>('/api/note', json('POST', { title, person, text }));
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const rec = new MediaRecorder(stream);
+      chunks.current = [];
+      rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setRecordedClip(new Blob(chunks.current, { type: rec.mimeType || 'audio/webm' }));
+        window.clearInterval(timer.current);
+        setRecording(false);
+      };
+      recRef.current = rec;
+      rec.start();
+      setRecordedClip(null);
+      setSeconds(0);
+      timer.current = window.setInterval(() => setSeconds((x) => x + 1), 1000);
+      setRecording(true);
+    } catch {
+      setError('Microphone access was denied or no microphone is available.');
+    }
+  };
+  const stop = () => recRef.current?.state === 'recording' && recRef.current.stop();
+
+  useEffect(
+    () => () => {
+      window.clearInterval(timer.current);
+      if (recRef.current?.state === 'recording') recRef.current.stop();
+    },
+    [],
+  );
+
+  const save = async () => {
+    setError('');
+    const fd = new FormData();
+    fd.append('title', title);
+    fd.append('person', person);
+    if (mode === 'record' && clip) {
+      const ext = clip.type.includes('mp4') ? 'm4a' : clip.type.includes('ogg') ? 'ogg' : 'webm';
+      fd.append('audio', clip, `recording.${ext}`);
+      setBusy('Transcribing with ElevenLabs Scribe v2 and structuring …');
+    } else {
+      fd.append('text', text);
+      setBusy('Structuring and filling in metadata …');
+    }
+    try {
+      const res = await kb<SpeechResult>('/api/speech', { method: 'POST', body: fd });
+      if (res.warning) setError(`Saved, but without structuring: ${res.warning}`);
       onSaved(res.path);
     } catch (e) {
       setError(String((e as Error).message));
     } finally {
-      setSaving(false);
+      setBusy('');
     }
   };
 
+  const ready = mode === 'record' ? !!clip && !recording : !!text.trim();
+
   return (
-    <Modal title="Record a voice note" onClose={onClose}>
+    <Modal title="Voice note" onClose={busy ? () => undefined : onClose}>
       <div className="flex flex-col gap-3">
-        <input className={inputCls} placeholder="Title, e.g. “Gritting plan Moritzberg”" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <input className={inputCls} placeholder="Person (optional)" value={person} onChange={(e) => setPerson(e.target.value)} />
-        <div className="flex items-center gap-2">
-          {recording ? (
-            <button type="button" className={cn(btnCls, 'border-red-500 text-red-500')} onClick={stop}>
-              <Square className="size-4 fill-current" /> Stop recording
+        <p className="text-xs text-text-secondary">
+          Speak freely – the recording is transcribed with ElevenLabs Scribe v2, then an LLM turns it into a structured note
+          (summary, sections, people, places, tags). The original transcript and recording are kept.
+        </p>
+        <div className="flex gap-1 rounded-lg bg-surface-secondary p-1 text-xs">
+          {(['record', 'type'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              disabled={recording || !!busy}
+              className={cn('flex-1 rounded-md px-2 py-1', mode === m ? 'bg-surface-primary font-medium text-text-primary shadow-sm' : 'text-text-secondary')}
+            >
+              {m === 'record' ? 'Record audio' : 'Type text'}
             </button>
-          ) : (
-            <button type="button" className={btnCls} onClick={start} disabled={!supported}>
-              <Mic className="size-4" /> Start recording
-            </button>
-          )}
-          {recording && <span className="flex items-center gap-1.5 text-xs text-red-500"><span className="size-2 animate-pulse rounded-full bg-red-500" />listening …</span>}
+          ))}
         </div>
-        {!supported && (
-          <p className="text-xs text-text-secondary">
-            This browser does not support speech recognition (use Chrome or Edge). You can also type or paste the text.
+
+        {mode === 'record' ? (
+          <div className="flex flex-col items-center gap-3 rounded-lg border border-border-light p-4">
+            {recording ? (
+              <button type="button" onClick={stop} className="flex size-16 items-center justify-center rounded-full bg-red-500 text-white shadow-lg hover:bg-red-600" aria-label="Stop recording">
+                <Square className="size-6 fill-current" />
+              </button>
+            ) : (
+              <button type="button" onClick={start} disabled={!supported || !!busy} className="flex size-16 items-center justify-center rounded-full bg-green-600 text-white shadow-lg hover:bg-green-700 disabled:opacity-50" aria-label="Start recording">
+                <Mic className="size-7" />
+              </button>
+            )}
+            <div className="text-sm text-text-secondary">
+              {recording ? (
+                <span className="flex items-center gap-1.5 text-red-500"><span className="size-2 animate-pulse rounded-full bg-red-500" />Recording {fmtSeconds(seconds)}</span>
+              ) : clip ? (
+                `Recording ready (${fmtSeconds(seconds)})`
+              ) : supported ? (
+                'Click to start recording'
+              ) : (
+                'Recording is not supported in this browser'
+              )}
+            </div>
+            {clipUrl && !recording && <audio controls src={clipUrl} className="w-full" />}
+            <button type="button" className="text-xs text-text-secondary underline hover:text-text-primary" onClick={() => audioInput.current?.click()} disabled={recording || !!busy}>
+              or upload an audio file
+            </button>
+            <input
+              ref={audioInput}
+              type="file"
+              accept="audio/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) {
+                  setRecordedClip(f);
+                  setSeconds(0);
+                }
+                e.target.value = '';
+              }}
+            />
+          </div>
+        ) : (
+          <textarea
+            className={cn(inputCls, 'min-h-40 resize-y')}
+            placeholder="Type or paste your notes – they are structured the same way."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <input className={inputCls} placeholder="Title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input className={inputCls} placeholder="Your name (optional)" value={person} onChange={(e) => setPerson(e.target.value)} />
+        </div>
+        {busy && (
+          <p className="flex items-center gap-1.5 text-xs text-text-secondary">
+            <Loader2 className="size-3.5 animate-spin" /> {busy}
           </p>
         )}
-        <textarea
-          className={cn(inputCls, 'min-h-40 resize-y')}
-          placeholder="The transcript appears here – you can correct it before saving."
-          value={interim ? `${text} ${interim}` : text}
-          onChange={(e) => setText(e.target.value)}
-          readOnly={recording}
-        />
         {error && <p className="text-xs text-red-500">{error}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" className={btnCls} onClick={onClose}>Cancel</button>
-          <button type="button" className={primaryCls} onClick={save} disabled={saving || recording || !text.trim()}>
-            {saving && <Loader2 className="size-4 animate-spin" />} Save to speech/
+          <button type="button" className={btnCls} onClick={onClose} disabled={!!busy}>Cancel</button>
+          <button type="button" className={primaryCls} onClick={save} disabled={!ready || !!busy}>
+            {busy && <Loader2 className="size-4 animate-spin" />} Transcribe &amp; save
           </button>
         </div>
       </div>

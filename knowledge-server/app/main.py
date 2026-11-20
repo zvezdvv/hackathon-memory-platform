@@ -16,8 +16,9 @@ from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Q
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 
+from . import ai
 from .mcp_tools import mcp
-from .store import EDITABLE_EXT, JWT_SECRET, safe_path, split_frontmatter, store
+from .store import AUDIO_DIR, EDITABLE_EXT, JWT_SECRET, safe_path, split_frontmatter, store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -141,6 +142,46 @@ def note(payload: dict = Body(...)):
     return {"path": path}
 
 
+@app.post("/api/speech", dependencies=[Depends(require_user)])
+async def speech(
+    audio: UploadFile | None = File(None),
+    text: str = Form(""),
+    title: str = Form(""),
+    person: str = Form(""),
+):
+    """Voice note: transcribe with Scribe v2 (if audio), structure with an LLM, save to speech/."""
+    if not ai.enabled():
+        raise HTTPException(503, "OPENROUTER_KEY is not configured on the server")
+    audio_name, transcriber, transcript = "", "", text.strip()
+    if audio is not None:
+        data = await audio.read()
+        if not data:
+            raise HTTPException(400, "Empty recording")
+        audio_name = store.save_audio(audio.filename or "recording.webm", data)
+        try:
+            transcript = await ai.transcribe(data, audio.filename or "recording.webm", audio.content_type or "")
+        except RuntimeError as e:
+            raise HTTPException(502, str(e)) from e
+        transcriber = ai.TRANSCRIBE_MODEL
+    if not transcript:
+        raise HTTPException(400, "Nothing was recognized – please try again")
+    structured, warning = None, ""
+    try:
+        structured = await ai.structure(transcript, title, person)
+    except RuntimeError as e:
+        warning = str(e)  # still save the raw transcript
+    path = store.save_voice_note(transcript, structured, person, title, audio_name, transcriber)
+    return {"path": path, "transcript": transcript, "structured": structured is not None, "warning": warning}
+
+
+@app.get("/api/audio")
+def audio_file(name: str):
+    p = (AUDIO_DIR / Path(name).name).resolve()
+    if AUDIO_DIR.resolve() not in p.parents or not p.is_file():
+        raise HTTPException(404, "File not found")
+    return FileResponse(p)
+
+
 @app.get("/api/people")
 def people():
     return store.people()
@@ -220,10 +261,24 @@ def view(path: str, hl: str = "", embed: int = 0):
     text_content = store.get_text(path)
     meta, body = split_frontmatter(text_content) if ext in (".md", ".markdown") else ({}, text_content)
 
+    audio_html = ""
+    if meta.get("audio"):
+        audio_html = (
+            f'<div class="meta"><strong>Original recording:</strong><br>'
+            f'<audio controls preload="none" style="width:100%" src="api/audio?name={quote(meta["audio"])}"></audio></div>'
+        )
     meta_html = ""
     if meta:
+        def pretty(v: str) -> str:
+            v = v.strip()
+            if v.startswith("[") and v.endswith("]"):
+                v = ", ".join(x.strip().strip('"') for x in v[1:-1].split(",") if x.strip())
+            return v
+
         rows = "".join(
-            f"<tr><td>{html.escape(k)}</td><td>{html.escape(v)}</td></tr>" for k, v in meta.items()
+            f"<tr><td>{html.escape(k)}</td><td>{html.escape(pretty(v))}</td></tr>"
+            for k, v in meta.items()
+            if pretty(v) and k not in ("audio", "structured")
         )
         meta_html = f'<table class="meta">{rows}</table>'
 
@@ -251,7 +306,7 @@ def view(path: str, hl: str = "", embed: int = 0):
         body_html = "".join(f"<p>{html.escape(x)}</p>" for x in paras) or "<p><em>No text extracted.</em></p>"
 
     raw_url = f"api/raw?path={quote(path)}"
-    content = f'<div id="content">{meta_html}{body_html}</div>'
+    content = f'<div id="content">{meta_html}{audio_html}{body_html}</div>'
     tabs = ""
     if ext == ".pdf":
         tabs = (

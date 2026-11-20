@@ -28,6 +28,7 @@ log = logging.getLogger("knowledge")
 ROOT = Path(os.getenv("KNOWLEDGE_ROOT", "/data/knowledge")).resolve()
 STATE = ROOT / ".state"
 TEXT_CACHE = STATE / "text"
+AUDIO_DIR = STATE / "audio"
 INDEX_FILE = STATE / "index.json"
 RAG_API_URL = os.getenv("RAG_API_URL", "http://rag_api:8000").rstrip("/")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:8100").rstrip("/")
@@ -163,6 +164,7 @@ class KnowledgeStore:
         for folder in TOP_FOLDERS:
             (ROOT / folder).mkdir(parents=True, exist_ok=True)
         TEXT_CACHE.mkdir(parents=True, exist_ok=True)
+        AUDIO_DIR.mkdir(parents=True, exist_ok=True)
         if INDEX_FILE.exists():
             try:
                 self.entries = json.loads(INDEX_FILE.read_text("utf-8"))
@@ -472,7 +474,7 @@ class KnowledgeStore:
                     "rolle": rolle,
                     "datum": datum,
                     "date_source": date_source,
-                    "ort": meta.get("ort", ""),
+                    "ort": meta.get("ort") or meta.get("places", "").strip("[]").replace('"', ""),
                     "tags": tags,
                     "thema": meta.get("topic") or meta.get("thema", ""),
                     "updated_by": [u["path"] for u in updates.get(doc_id, []) if u["path"] != path] if doc_id else [],
@@ -500,9 +502,13 @@ class KnowledgeStore:
             doc_id = meta.get("id", "").strip()
             if doc_id:
                 ids[path] = doc_id
-            note = " ".join(meta.get(k, "") for k in ("hinweis", "aktualisiert", "ersetzt", "note", "updates", "supersedes"))
-            if not re.search(r"aktualisier|ersetzt|gilt dieser stand|update|supersede", note.lower()):
+            explicit = " ".join(meta.get(k, "") for k in ("updates", "supersedes"))
+            note = " ".join(meta.get(k, "") for k in ("hinweis", "aktualisiert", "ersetzt", "note"))
+            if re.search(r"aktualisier|ersetzt|gilt dieser stand|update|supersede", note.lower()):
+                explicit += " " + note
+            if not explicit.strip():
                 continue
+            note = explicit
             for target in set(re.findall(r"\b([A-Z]{1,2}\d{2})\b", note)) - {doc_id}:
                 updates.setdefault(target, []).append(
                     {"path": path, "id": doc_id, "datum": meta.get("date") or meta.get("datum", "")}
@@ -674,7 +680,66 @@ class KnowledgeStore:
         body = frontmatter(meta) + f"# {meta['title']}\n\n{text.strip()}\n"
         return self.write_text(f"speech/{today()}_{slugify(title or 'note')}.md", body)
 
-    def save_interview(self, person: str, topic: str, content: str, interviewer: str = "", guide: str = "") -> str:
+    def save_voice_note(
+        self,
+        transcript: str,
+        structured: dict | None,
+        person: str = "",
+        title: str = "",
+        audio: str = "",
+        transcriber: str = "",
+    ) -> str:
+        """Saves a voice note: structured knowledge on top, verbatim transcript below."""
+        st = structured or {}
+        title = (st.get("title") or title or "Voice note").strip()
+        people = [p for p in st.get("people", []) if isinstance(p, str)]
+        meta = {
+            "title": title,
+            "type": "voice note",
+            "date": today(),
+            "language": st.get("language") or "",
+            "person": person,
+            "people": people,
+            "places": [p for p in st.get("places", []) if isinstance(p, str)],
+            "tags": [t for t in st.get("tags", []) if isinstance(t, str)],
+            "refers_to_date": st.get("date") or "",
+            "updates": [u for u in st.get("updates", []) if isinstance(u, str)],
+            "audio": audio,
+            "transcribed_with": transcriber,
+            "structured": "yes" if st else "no",
+        }
+        labels = st.get("labels") if isinstance(st.get("labels"), dict) else {}
+        lines = [f"# {title}", ""]
+        if st.get("summary"):
+            lines += [f"## {labels.get('summary') or 'Summary'}", *[f"- {b}" for b in st["summary"] if isinstance(b, str)], ""]
+        for sec in st.get("sections", []) or []:
+            if not isinstance(sec, dict) or not sec.get("points"):
+                continue
+            lines += [f"## {sec.get('heading') or 'Details'}"]
+            lines += [f"- {pt}" for pt in sec["points"] if isinstance(pt, str)]
+            lines += [""]
+        quoted = "\n".join(f"> {ln}" if ln.strip() else ">" for ln in transcript.strip().splitlines())
+        lines += [f"## {labels.get('transcript') or 'Original transcript'}", quoted, ""]
+        body = frontmatter(meta) + "\n".join(lines)
+        return self.write_text(f"speech/{today()}_{slugify(title)}.md", body)
+
+    def save_audio(self, filename: str, data: bytes) -> str:
+        AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+        name = unique_path(AUDIO_DIR / f"{today()}_{safe_filename(filename)}").name
+        (AUDIO_DIR / name).write_bytes(data)
+        return name
+
+    def save_interview(
+        self,
+        person: str,
+        topic: str,
+        content: str,
+        interviewer: str = "",
+        guide: str = "",
+        places: list[str] | None = None,
+        tags: list[str] | None = None,
+    ) -> str:
+        rules = len(re.findall(r"\*\*(?:RULE|REGEL)[:\*]", content, re.I))
         meta = {
             "title": f"Interview {person} – {topic}",
             "type": "interview",
@@ -683,6 +748,9 @@ class KnowledgeStore:
             "date": today(),
             "interviewer": interviewer,
             "guide": guide,
+            "places": [p for p in (places or []) if isinstance(p, str) and p.strip()],
+            "tags": [t for t in (tags or []) if isinstance(t, str) and t.strip()],
+            "rules": str(rules) if rules else "",
         }
         body = content.strip()
         if body.startswith("---"):

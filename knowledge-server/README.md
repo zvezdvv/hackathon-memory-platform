@@ -30,6 +30,19 @@ front matter. A document whose front matter says it updates others (e.g. `note: 
 N01, N06"` or the German `hinweis: "Aktualisiert … N01, N06"`) is detected as the newer
 version: search results and the overlay flag the older sources.
 
+## Voice notes
+
+Speech in the overlay records audio in the browser and sends it to `POST /api/speech`:
+
+1. **Transcription** with ElevenLabs Scribe v2 (`TRANSCRIBE_MODEL`, via OpenRouter)
+2. **Structuring** with an LLM (`STRUCTURE_MODEL`, default `openai/gpt-6-luna`): title,
+   summary, sections, people, places, tags and referenced document IDs – in the same
+   language as the recording (set `NOTE_LANGUAGE` to force one)
+3. Saved as `speech/<date>_<title>.md` – structured note on top, verbatim transcript below;
+   the original recording is kept in `.state/audio/` and playable in the viewer
+
+Typed text goes through step 2 only. If structuring fails, the raw transcript is still saved.
+
 ## Embeddings
 
 Without an embedding key only keyword search works. Set `OPENROUTER_KEY` in the `.env` in
