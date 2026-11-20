@@ -87,6 +87,8 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.store._rag = AsyncMock(return_value=httpx.Response(200, json=[[chunk, 0.74]]))
         self.assertEqual((await self.store.search("zzqaunmatchable792orvb"))["results"], [])
         self.assertEqual((await self.store.search("ZX730"))["mode"], "keyword")
+        self.store._rag.return_value = httpx.Response(200, json=[[chunk, 0.61]])
+        self.assertEqual((await self.store.search("Streusalz Cookie-Richtlinie"))["results"], [])
         self.store._rag.return_value = httpx.Response(200, json=[[chunk, 0.52]])
         self.assertEqual((await self.store.search("deicing supply"))["results"][0]["path"], path)
 

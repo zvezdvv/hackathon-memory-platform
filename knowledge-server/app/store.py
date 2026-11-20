@@ -42,7 +42,7 @@ OWNER_ID = "smart-city-knowledge"
 INDEX_VERSION = os.getenv("INDEX_VERSION", "")
 VERSION_FILE = STATE / "index_version"
 # pgvector cosine distance. Lexical matches still qualify independently.
-SEARCH_MAX_DISTANCE = float(os.getenv("KNOWLEDGE_SEARCH_MAX_DISTANCE", "0.65"))
+SEARCH_MAX_DISTANCE = float(os.getenv("KNOWLEDGE_SEARCH_MAX_DISTANCE", "0.60"))
 SEARCH_TEXT_VERSION = 1
 
 TOP_FOLDERS = ["files", "speech", "interviews", "_guides"]
@@ -758,9 +758,10 @@ class KnowledgeStore:
 
     def _keyword_search(self, query: str, paths: list[str], k: int) -> list[dict]:
         q = query.lower()
-        terms = [t for t in re.findall(r"[\wäöüß]+", q) if len(t) > 2 and t not in STOPWORDS]
+        terms = {t for t in re.findall(r"[\wäöüß]+", q) if len(t) > 2 and t not in STOPWORDS}
         if not terms:
             return []
+        min_matches = min(2, len(terms))
         scored = []
         for path in paths:
             try:
@@ -780,7 +781,7 @@ class KnowledgeStore:
                 low = para.lower()
                 score = sum(min(low.count(t), 3) for t in terms)
                 distinct = sum(1 for t in terms if t in low)
-                if not distinct:
+                if distinct < min_matches:
                     continue
                 score += distinct * 2 + (5 if q in low else 0) + head_bonus
                 scored.append((score, path, para))
