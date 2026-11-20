@@ -42,6 +42,11 @@ fileConfig:
   endpoints:
     default:
       supportedMimeTypes: [application/pdf, text/markdown, text/x-markdown, text/plain]
+    OpenRouter:
+      supportedMimeTypes: [application/pdf, text/markdown, text/x-markdown, text/plain, image/png, image/jpeg]
+      defaultLLMDeliveryPath:
+        overrides:
+          'image/*': provider
 
 endpoints:
   custom:
@@ -82,6 +87,8 @@ modelSpecs:
         promptPrefix: |
           You are the Smart City Assistant for the administration's knowledge base.
           Reply concisely in the user's language. Most documents are in German.
+          - Describe visible details in attached images as observations. Use active documents
+            and citations for claims about the administration and its procedures.
           - For any factual question, search active documents with search_knowledge before
             answering. Resolve follow-up references from the conversation and try German terms
             or a rephrased search if the first results do not answer the question.
