@@ -41,6 +41,7 @@ const mockUseProjectsInfiniteQuery = jest.fn(
 );
 /** What the chats list asks the server for, captured per render. */
 const mockListParams = jest.fn();
+let mockSidebarProjects: boolean | undefined;
 const mockSetChatsExpanded = jest.fn();
 const mockMoveToTop = jest.fn();
 const mockUseTitleGeneration = jest.fn(() => {
@@ -108,7 +109,9 @@ jest.mock('~/data-provider', () => ({
   useProjectsInfiniteQuery: () => mockUseProjectsInfiniteQuery(),
   useTitleGeneration: () => mockUseTitleGeneration(),
   useGetEndpointsQuery: () => ({ data: {}, isLoading: false }),
-  useGetStartupConfig: () => ({ data: { modelSpecs: { list: [] } } }),
+  useGetStartupConfig: () => ({
+    data: { modelSpecs: { list: [] }, interface: { sidebarProjects: mockSidebarProjects } },
+  }),
   useGetConversationTags: () => mockUseGetConversationTags(),
 }));
 
@@ -257,6 +260,25 @@ describe('ConversationsSection section order', () => {
       projects.compareDocumentPosition(pinned) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(pinned.compareDocumentPosition(chats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('hides projects and lists their chats with the rest of the history when configured', async () => {
+    mockSidebarProjects = false;
+    try {
+      const { queryByTestId, getByTestId } = renderSection();
+      await settleRenders();
+
+      expect(queryByTestId('projects-stub')).toBeNull();
+      expect(getByTestId('conversations-stub')).toBeInTheDocument();
+      expect(mockListParams).toHaveBeenLastCalledWith(
+        expect.objectContaining({ projectId: undefined }),
+      );
+      expect(mockConversationsRender).toHaveBeenLastCalledWith(
+        expect.objectContaining({ showProjectBadge: false }),
+      );
+    } finally {
+      mockSidebarProjects = undefined;
+    }
   });
 });
 

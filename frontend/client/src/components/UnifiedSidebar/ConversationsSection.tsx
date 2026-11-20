@@ -5,6 +5,7 @@ import type { InfiniteQueryObserverResult } from '@tanstack/react-query';
 import type { ConversationListResponse } from 'librechat-data-provider';
 import type { List } from 'react-virtualized';
 import {
+  useGetStartupConfig,
   useProjectsInfiniteQuery,
   useConversationsInfiniteQuery,
   usePinnedConversationsQuery,
@@ -42,6 +43,8 @@ const ConversationsSection = memo(() => {
   const isSmallScreen = useDrawerViewport();
   const { setSidebarOpen } = useSidebarToggle();
   const { isAuthenticated } = useAuthContext();
+  const { data: startupConfig } = useGetStartupConfig();
+  const showProjects = startupConfig?.interface?.sidebarProjects !== false;
   useTitleGeneration(isAuthenticated);
 
   const [isChatsExpanded, setIsChatsExpanded] = useLocalStorage('chatsExpanded', true);
@@ -64,7 +67,7 @@ const ConversationsSection = memo(() => {
     isError: projectsFailed,
   } = useProjectsInfiniteQuery(
     { sortBy: 'lastConversationAt', sortDirection: 'desc', limit: 25 },
-    { enabled: isAuthenticated, staleTime: 30000, cacheTime: 300000 },
+    { enabled: isAuthenticated && showProjects, staleTime: 30000, cacheTime: 300000 },
   );
   /** Only a loaded, empty project list proves the account has nothing yet. While the
    *  projects are loading or failed to load, an empty Chats list claims no more than
@@ -77,6 +80,7 @@ const ConversationsSection = memo(() => {
    *  would have no way back. So does a list whose projects failed to load, which would
    *  otherwise hide every project chat behind a section that cannot show them. */
   const scopeToUnassigned =
+    showProjects &&
     !showProjectChats &&
     !isArchivedView &&
     !search.debouncedQuery &&
@@ -240,7 +244,7 @@ const ConversationsSection = memo(() => {
             {/* `min-h-full` keeps the sections filling a tall sidebar, so the chats
             list still claims the space below them when there is little to show. */}
             <div ref={setScrollContent} className="flex min-h-full flex-col">
-              {!search.query && (
+              {showProjects && !search.query && (
                 <ProjectsSection toggleNav={toggleNav} isAuthenticated={isAuthenticated} />
               )}
               {!search.query && (
@@ -271,6 +275,7 @@ const ConversationsSection = memo(() => {
                 isError={isError}
                 onRetry={retryConversations}
                 chatsHeaderTrailing={chatsHeaderTrailing}
+                showProjectBadge={showProjects}
                 accountHasProjects={scopeToUnassigned && hasProjects}
                 scrollViewport={scrollViewport}
                 scrollContent={scrollContent}
