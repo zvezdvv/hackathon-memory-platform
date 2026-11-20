@@ -209,6 +209,7 @@ function RootLayout() {
                         the pane's `inert` read. */}
                     <UnifiedSidebar
                       isSliding={isSliding}
+                      memoryOpen={memoryOpen}
                       switchToHistory={newChatSwitchToHistory}
                       showNewChat={config?.interface != null && config.interface.sidebarNewChat !== false}
                     />
@@ -231,7 +232,7 @@ function RootLayout() {
                         ready={isConfigReady && configError == null}
                         userId={user?.id}
                       >
-                        <div className="contents" inert={memoryOpen ? '' : undefined}>
+                        <div className={memoryOpen ? 'hidden' : 'contents'}>
                           <Outlet />
                         </div>
                       </MCPAppsPolicyProvider>

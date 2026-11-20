@@ -76,10 +76,13 @@ const NavIconButton = memo(function NavIconButton({
         onNavigate?.();
         return;
       }
+      if (link.id === MEMORY_PANEL) {
+        setActive(isActive ? DEFAULT_PANEL : MEMORY_PANEL);
+        onLeaveInsights?.();
+        return;
+      }
       if (isActive && expanded) {
-        if (link.id === MEMORY_PANEL) {
-          setActive(DEFAULT_PANEL);
-        } else if (onRepeat) {
+        if (onRepeat) {
           onRepeat();
         } else {
           onCollapse?.();
@@ -152,7 +155,12 @@ function ExpandedPanel({
   const { startNewChat, handleNewChatClick } = useNewChat({ onNewChat: handlePanelSwitch });
 
   const toggleLabel = expanded ? 'com_nav_close_sidebar' : 'com_nav_open_sidebar';
-  const toggleClick = expanded ? onCollapse : onExpand;
+  const toggleClick = () => {
+    if (effectiveActive === MEMORY_PANEL) {
+      setActive(DEFAULT_PANEL);
+    }
+    (expanded ? onCollapse : onExpand)?.();
+  };
   const toggleSidebarHint = useShortcutHint('toggleSidebar', localize(toggleLabel));
   const toggleSidebarAriaKey = useShortcutAriaKey('toggleSidebar');
 
@@ -171,7 +179,7 @@ function ExpandedPanel({
             aria-expanded={expanded}
             aria-keyshortcuts={toggleSidebarAriaKey}
             className="h-9 w-9"
-            onClick={() => toggleClick?.()}
+            onClick={toggleClick}
           >
             <Sidebar aria-hidden="true" className="text-text-primary h-5 w-5 rtl:-scale-x-100" />
           </Button>

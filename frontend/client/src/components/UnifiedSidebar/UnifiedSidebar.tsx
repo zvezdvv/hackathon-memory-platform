@@ -53,10 +53,12 @@ function SidebarChatProvider({ children }: { children: ReactNode }) {
 
 function UnifiedSidebar({
   isSliding = false,
+  memoryOpen = false,
   switchToHistory,
   showNewChat,
 }: {
   isSliding?: boolean;
+  memoryOpen?: boolean;
   /** The user's "new chat returns to the chat list" preference. App-global
    *  shell state the sidebar only reads, so the host passes it in. */
   switchToHistory: boolean;
@@ -78,7 +80,7 @@ function UnifiedSidebar({
 
   const links = useUnifiedSidebarLinks();
   const isInsightsRoute = location.pathname.startsWith('/insights');
-  const panelExpanded = expanded && !isInsightsRoute;
+  const panelExpanded = expanded && !isInsightsRoute && !memoryOpen;
 
   /** The aside's max width is a viewport percentage, so the announced range has to track
    *  the viewport rather than a render-time snapshot of it. */

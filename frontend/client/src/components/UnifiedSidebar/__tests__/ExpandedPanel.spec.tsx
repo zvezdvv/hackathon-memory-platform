@@ -7,7 +7,7 @@ import { MessagesSquare, NotebookPen } from 'lucide-react';
 import { render, fireEvent, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { NavLink } from '~/common';
-import { ActivePanelProvider, DEFAULT_PANEL, activePanelAtom } from '~/Providers';
+import { ActivePanelProvider, DEFAULT_PANEL, MEMORY_PANEL, activePanelAtom } from '~/Providers';
 
 const mockNewConversation = jest.fn();
 const mockClearMessagesCache = jest.fn();
@@ -195,6 +195,23 @@ describe('ExpandedPanel', () => {
       fireEvent.click(inactiveButton);
       expect(onExpand).toHaveBeenCalledTimes(1);
       expect(getDefaultStore().get(activePanelAtom)).toBe('prompts');
+    });
+
+    it('opens and closes Memory without changing the saved sidebar expansion', () => {
+      const links = [
+        ...createLinks(),
+        { title: 'com_ui_memories' as const, icon: NotebookPen, id: MEMORY_PANEL },
+      ];
+      const { onExpand } = renderPanel({ expanded: false, links });
+      const button = screen.getByRole('button', { name: 'com_ui_memories' });
+
+      fireEvent.click(button);
+      expect(getDefaultStore().get(activePanelAtom)).toBe(MEMORY_PANEL);
+      expect(button).toHaveAttribute('aria-pressed', 'true');
+
+      fireEvent.click(button);
+      expect(getDefaultStore().get(activePanelAtom)).toBe(DEFAULT_PANEL);
+      expect(onExpand).not.toHaveBeenCalled();
     });
 
     it('notifies mobile navigation after a route link is selected', () => {
