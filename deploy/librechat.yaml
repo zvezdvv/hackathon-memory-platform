@@ -42,10 +42,10 @@ endpoints:
       apiKey: '${OPENROUTER_KEY}'
       baseURL: https://openrouter.ai/api/v1
       models:
-        default: [openai/gpt-4.1-mini]
+        default: [openai/gpt-6-luna]
         fetch: false
       titleConvo: true
-      titleModel: openai/gpt-4.1-mini
+      titleModel: openai/gpt-6-luna
       dropParams: [stop]
       modelDisplayLabel: OpenRouter
 
