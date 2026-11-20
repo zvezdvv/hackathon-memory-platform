@@ -158,20 +158,29 @@ async def person_overview(person: str) -> str:
 
 @mcp.tool()
 async def save_interview(
-    person: str, topic: str, content: str, interviewer: str = "", guide: str = "",
+    person: str,
+    topic: str,
+    content: str,
+    places: list[str] | None = None,
+    tags: list[str] | None = None,
+    interviewer: str = "",
+    guide: str = "",
     document_status: DocumentStatus = "active",
 ) -> str:
-    """Saves an interview protocol under interviews/<person>/.
+    """Saves a confirmed interview protocol under interviews/<person>/.
 
     Args:
         person: Name of the interviewed person.
         topic: Topic of the session.
-        content: Protocol in Markdown (summary, questions & answers, open points).
-        interviewer: Optional, who conducted the interview.
+        content: Protocol in Markdown following the guide's format (Summary, Rules with
+            **RULE:** items, Places, Processes, Deviations, Open points).
+        places: Every place mentioned (street/section names), used as metadata.
+        tags: 3-6 lowercase keywords, used as metadata.
+        interviewer: Only if the interviewer's name was explicitly stated; otherwise leave empty.
         guide: Optional, guide used (path).
         document_status: Status selected by the user: active, inactive or draft.
     """
-    path = store.save_interview(person, topic, content, interviewer, guide, document_status)
+    path = store.save_interview(person, topic, content, interviewer, guide, places, tags, document_status)
     return f"Saved: [{path}]({view_url(path)}). Status: {document_status}."
 
 

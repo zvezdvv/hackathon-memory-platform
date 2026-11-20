@@ -17,9 +17,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
+from . import ai
 from .mcp_tools import mcp
 from .store import (
-    EDITABLE_EXT, JWT_SECRET, DocumentStatus, rel, safe_path, split_frontmatter, store,
+    AUDIO_DIR, EDITABLE_EXT, JWT_SECRET, DocumentStatus, rel, safe_path, split_frontmatter, store,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -170,6 +171,69 @@ async def note(payload: Note):
     return {"path": path}
 
 
+AUDIO_TYPES = {"webm": "audio/webm", "ogg": "audio/ogg", "m4a": "audio/mp4"}
+MAX_RECORDING_BYTES = 25_000_000
+
+
+@app.post("/api/speech", dependencies=[Depends(require_user)])
+async def speech(
+    audio: UploadFile | None = File(None),
+    text: str = Form(""),
+    title: str = Form(""),
+    person: str = Form(""),
+    document_status: DocumentStatus = Form("active"),
+):
+    """Voice note: transcribe with Scribe v2 (if audio), structure with an LLM, save to speech/."""
+    if not ai.enabled():
+        raise HTTPException(503, "OPENROUTER_KEY is not configured on the server")
+    data = b""
+    filename, media_type = "", ""
+    audio_name, transcriber, transcript = "", "", text.strip()
+    if audio is not None:
+        ext = Path(audio.filename or "").suffix.lower().lstrip(".")
+        media_type = AUDIO_TYPES.get(ext, "")
+        if not media_type:
+            raise HTTPException(400, "Unsupported browser recording format")
+        filename = f"recording.{ext}"
+        data = await audio.read(MAX_RECORDING_BYTES + 1)
+        if not data:
+            raise HTTPException(400, "Empty recording")
+        if len(data) > MAX_RECORDING_BYTES:
+            raise HTTPException(413, "Recordings must be at most 25 MB")
+        try:
+            transcript = await ai.transcribe(data, filename, media_type)
+        except RuntimeError as e:
+            raise HTTPException(502, str(e)) from e
+        transcriber = ai.TRANSCRIBE_MODEL
+    if not transcript:
+        raise HTTPException(400, "Nothing was recognized – please try again")
+    structured, warning = None, ""
+    try:
+        structured = await ai.structure(transcript, title, person)
+    except RuntimeError as e:
+        warning = str(e)  # still save the raw transcript
+    if data:
+        audio_name = store.save_audio(filename, data)
+    try:
+        path = store.save_voice_note(
+            transcript, structured, person, title, audio_name, transcriber, document_status,
+        )
+    except Exception:
+        if audio_name:
+            (AUDIO_DIR / audio_name).unlink(missing_ok=True)
+        raise
+    return {"path": path, "transcript": transcript, "structured": structured is not None, "warning": warning}
+
+
+@app.get("/api/audio", dependencies=[Depends(require_user)])
+def audio_file(name: str):
+    p = (AUDIO_DIR / Path(name).name).resolve()
+    media_type = AUDIO_TYPES.get(p.suffix.lower().lstrip("."))
+    if not media_type or AUDIO_DIR.resolve() not in p.parents or not p.is_file():
+        raise HTTPException(404, "File not found")
+    return FileResponse(p, media_type=media_type, headers={"Cache-Control": "private, no-store"})
+
+
 @app.get("/api/people")
 def people():
     return store.people()
@@ -216,8 +280,26 @@ if(hl){const H=norm(hl);const head=H.slice(0,50);let first=null;
 function tab(n){document.querySelectorAll('[data-tab]').forEach(e=>e.classList.toggle('hidden',e.dataset.tab!==n));
  document.querySelectorAll('.tabs .btn').forEach(b=>b.classList.toggle('on',b.dataset.t===n));}
 function parentToken(){return new Promise(res=>{if(window.parent===window)return res('');
- const t=setTimeout(()=>res(''),1500);window.addEventListener('message',function h(e){if(e.data&&e.data.type==='kb-token'){clearTimeout(t);window.removeEventListener('message',h);res(e.data.token||'');}});
- window.parent.postMessage({type:'kb-token-request'},'*');});}
+ const origin=document.referrer?new URL(document.referrer).origin:location.origin;
+ function receive(e){if(e.origin===origin&&e.source===window.parent&&e.data?.type==='kb-token'){
+  clearTimeout(timer);window.removeEventListener('message',receive);res(e.data.token||'');}}
+ const timer=setTimeout(()=>{window.removeEventListener('message',receive);res('');},1500);
+ window.addEventListener('message',receive);window.parent.postMessage({type:'kb-token-request'},origin);});}
+async function loadRecording(button){
+ button.disabled=true;const notice=document.getElementById('recording-notice');
+ try{
+  const token=await parentToken();
+  if(!token){notice.textContent='Open this note in Memory while signed in to play the recording.';return;}
+  const res=await fetch('api/audio?name='+encodeURIComponent(button.dataset.name),{headers:{Authorization:token}});
+  if(!res.ok)throw Error('Unable to load recording');
+  const audio=document.getElementById('original-recording');
+  const src=URL.createObjectURL(await res.blob());
+  window.addEventListener('pagehide',()=>URL.revokeObjectURL(src),{once:true});
+  audio.src=src;audio.hidden=false;button.hidden=true;notice.textContent='';
+  audio.play().catch(()=>{});
+ }catch{notice.textContent='Unable to load the recording.';}
+ finally{button.disabled=false;}
+}
 async function save(){const token=await parentToken();const headers={'Content-Type':'application/json'};if(token)headers.Authorization=token;
  const r=await fetch('api/file',{method:'PUT',headers,body:JSON.stringify({path:PATH,content:document.getElementById('editor').value})});
  if(r.ok){location.href=location.pathname+'?path='+encodeURIComponent(PATH)+(params.get('embed')?'&embed=1':'');}
@@ -251,10 +333,26 @@ def view(path: str, hl: str = "", embed: int = 0):
     text_content = store.get_text(path)
     meta, body = split_frontmatter(text_content) if ext in (".md", ".markdown") else ({}, text_content)
 
+    audio_html = ""
+    if meta.get("audio"):
+        audio_html = (
+            f'<div class="meta"><button class="btn" type="button" onclick="loadRecording(this)"'
+            f' data-name="{html.escape(meta["audio"])}">Play original recording</button>'
+            '<span id="recording-notice" role="status"></span>'
+            '<audio id="original-recording" controls hidden style="width:100%"></audio></div>'
+        )
     meta_html = ""
     if meta:
+        def pretty(v: str) -> str:
+            v = v.strip()
+            if v.startswith("[") and v.endswith("]"):
+                v = ", ".join(x.strip().strip('"') for x in v[1:-1].split(",") if x.strip())
+            return v
+
         rows = "".join(
-            f"<tr><td>{html.escape(k)}</td><td>{html.escape(v)}</td></tr>" for k, v in meta.items()
+            f"<tr><td>{html.escape(k)}</td><td>{html.escape(pretty(v))}</td></tr>"
+            for k, v in meta.items()
+            if pretty(v) and k not in ("audio", "structured")
         )
         meta_html = f'<table class="meta">{rows}</table>'
 
@@ -282,7 +380,7 @@ def view(path: str, hl: str = "", embed: int = 0):
         body_html = "".join(f"<p>{html.escape(x)}</p>" for x in paras) or "<p><em>No text extracted.</em></p>"
 
     raw_url = f"api/raw?path={quote(path)}"
-    content = f'<div id="content">{meta_html}{body_html}</div>'
+    content = f'<div id="content">{meta_html}{audio_html}{body_html}</div>'
     tabs = ""
     if ext == ".pdf":
         tabs = (

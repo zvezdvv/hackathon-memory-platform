@@ -24,6 +24,7 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
             ROOT=root,
             STATE=state,
             TEXT_CACHE=state / "text",
+            AUDIO_DIR=state / "audio",
             INDEX_FILE=state / "index.json",
             STATUS_FILE=state / "document-status.json",
             VERSION_FILE=state / "index_version",
@@ -104,6 +105,22 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.store.entries, {})
         with self.assertRaisesRegex(ValueError, "valid PDF"):
             await self.store.save_uploads("files", [("sample.pdf", b"not a pdf", "active")])
+
+    async def test_voice_and_interview_metadata_preserve_the_selected_status(self):
+        voice = self.store.save_voice_note(
+            "Winterdienst am Rathaus", {"title": "Rathaus", "places": ["Rathaus"]},
+            document_status="draft",
+        )
+        interview = self.store.save_interview(
+            "Test person", "Rathaus", "**RULE:** Test", places=["Rathaus"], tags=["winterdienst"],
+            document_status="inactive",
+        )
+        docs = {doc["path"]: doc for doc in self.store.documents()}
+        self.assertEqual(docs[voice]["document_status"], "draft")
+        self.assertEqual(docs[interview]["document_status"], "inactive")
+        self.assertEqual(docs[interview]["tags"], ["winterdienst"])
+        self.assertEqual(docs[interview]["ort"], "Rathaus")
+        self.assertEqual((await self.store.search("Rathaus"))["results"], [])
 
 
 class PdfPageTests(unittest.IsolatedAsyncioTestCase):

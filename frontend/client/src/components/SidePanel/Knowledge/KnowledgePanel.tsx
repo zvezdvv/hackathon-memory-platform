@@ -275,110 +275,186 @@ function Viewer({ path, hl, onClose }: { path: string; hl?: string; onClose: () 
 
 /* ------------------------------------------------------------------ Speech */
 
-type SpeechRec = {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start: () => void;
-  stop: () => void;
-  onresult: ((e: { resultIndex: number; results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }> }) => void) | null;
-  onend: (() => void) | null;
-  onerror: ((e: { error: string }) => void) | null;
-};
+type SpeechResult = { path: string; transcript: string; structured: boolean; warning: string };
 
-function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (path: string) => void }) {
+function fmtSeconds(s: number) {
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Voice note: record audio → server transcribes with ElevenLabs Scribe v2 →
+ * an LLM structures it and fills in the metadata → saved under speech/.
+ */
+function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (path: string, warning: string) => void }) {
   const [title, setTitle] = useState('');
   const [person, setPerson] = useState('');
   const [status, setStatus] = useState<DocumentStatus>('active');
+  const [mode, setMode] = useState<'record' | 'type'>('record');
   const [text, setText] = useState('');
-  const [interim, setInterim] = useState('');
   const [recording, setRecording] = useState(false);
-  const [saving, setSaving] = useState(false);
+  const [requestingMic, setRequestingMic] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const [clip, setClip] = useState<Blob | null>(null);
+  const [clipUrl, setClipUrl] = useState('');
+  const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
-  const recRef = useRef<SpeechRec | null>(null);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const chunks = useRef<Blob[]>([]);
+  const timer = useRef<number | undefined>(undefined);
+  const mounted = useRef(false);
 
-  const Ctor = (window as unknown as Record<string, unknown>).SpeechRecognition ??
-    (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
-  const supported = typeof Ctor === 'function';
+  const supported = typeof window.MediaRecorder !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
 
-  const start = () => {
-    if (!supported) return;
+  useEffect(() => {
+    const url = clip ? URL.createObjectURL(clip) : '';
+    setClipUrl(url);
+    return () => { if (url) URL.revokeObjectURL(url); };
+  }, [clip]);
+
+  const start = async () => {
     setError('');
-    const rec = new (Ctor as new () => SpeechRec)();
-    rec.lang = navigator.language || 'en-US';
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.onresult = (e) => {
-      let finalText = '';
-      let interimText = '';
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const r = e.results[i];
-        if (r.isFinal) finalText += r[0].transcript;
-        else interimText += r[0].transcript;
+    setRequestingMic(true);
+    let stream: MediaStream | undefined;
+    try {
+      const input = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = input;
+      if (!mounted.current) {
+        input.getTracks().forEach((track) => track.stop());
+        return;
       }
-      if (finalText) setText((t) => (t ? `${t.trimEnd()} ${finalText.trim()}` : finalText.trim()));
-      setInterim(interimText);
-    };
-    rec.onerror = (e) => setError(`Speech recognition: ${e.error}`);
-    rec.onend = () => {
-      setRecording(false);
-      setInterim('');
-    };
-    recRef.current = rec;
-    rec.start();
-    setRecording(true);
+      const rec = new MediaRecorder(input);
+      chunks.current = [];
+      rec.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
+      rec.onstop = () => {
+        input.getTracks().forEach((t) => t.stop());
+        setClip(new Blob(chunks.current, { type: rec.mimeType || 'audio/webm' }));
+        window.clearInterval(timer.current);
+        setRecording(false);
+      };
+      recRef.current = rec;
+      rec.start();
+      setClip(null);
+      setSeconds(0);
+      timer.current = window.setInterval(() => setSeconds((x) => x + 1), 1000);
+      setRecording(true);
+    } catch {
+      stream?.getTracks().forEach((track) => track.stop());
+      if (mounted.current) setError('Microphone access was denied or no microphone is available.');
+    } finally {
+      if (mounted.current) setRequestingMic(false);
+    }
   };
-  const stop = () => recRef.current?.stop();
-  useEffect(() => () => recRef.current?.stop(), []);
+  const stop = () => recRef.current?.state === 'recording' && recRef.current.stop();
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      window.clearInterval(timer.current);
+      const recorder = recRef.current;
+      if (recorder) {
+        recorder.onstop = null;
+        if (recorder.state === 'recording') recorder.stop();
+        recorder.stream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
 
   const save = async () => {
-    setSaving(true);
     setError('');
+    const fd = new FormData();
+    fd.append('title', title);
+    fd.append('person', person);
+    fd.append('document_status', status);
+    if (mode === 'record' && clip) {
+      const ext = clip.type.includes('mp4') ? 'm4a' : clip.type.includes('ogg') ? 'ogg' : 'webm';
+      fd.append('audio', clip, `recording.${ext}`);
+      setBusy('Transcribing with ElevenLabs Scribe v2 and structuring …');
+    } else {
+      fd.append('text', text);
+      setBusy('Structuring and filling in metadata …');
+    }
     try {
-      const res = await kb<{ path: string }>('/api/note', json('POST', { title, person, text, document_status: status }));
-      onSaved(res.path);
+      const res = await kb<SpeechResult>('/api/speech', { method: 'POST', body: fd });
+      onSaved(res.path, res.warning);
     } catch (e) {
       setError(String((e as Error).message));
     } finally {
-      setSaving(false);
+      setBusy('');
     }
   };
 
+  const ready = mode === 'record' ? !!clip?.size && !recording && !requestingMic : !!text.trim();
+
   return (
-    <Modal title="Record a voice note" onClose={onClose}>
+    <Modal title="Voice note" onClose={busy ? () => undefined : onClose}>
       <div className="flex flex-col gap-3">
-        <input className={inputCls} placeholder="Title, e.g. “Gritting plan Moritzberg”" value={title} onChange={(e) => setTitle(e.target.value)} />
-        <input className={inputCls} placeholder="Person (optional)" value={person} onChange={(e) => setPerson(e.target.value)} />
-        <StatusSelect value={status} onChange={setStatus} disabled={saving} />
-        <div className="flex items-center gap-2">
-          {recording ? (
-            <button type="button" className={cn(btnCls, 'border-red-500 text-red-500')} onClick={stop}>
-              <Square className="size-4 fill-current" /> Stop recording
+        <p className="text-xs text-text-secondary">
+          Speak freely – the recording is transcribed with ElevenLabs Scribe v2, then an LLM turns it into a structured note
+          (summary, sections, people, places, tags). The original transcript and recording are kept.
+        </p>
+        <div className="flex gap-1 rounded-lg bg-surface-secondary p-1 text-xs">
+          {(['record', 'type'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              disabled={recording || requestingMic || !!busy}
+              className={cn('flex-1 rounded-md px-2 py-1', mode === m ? 'bg-surface-primary font-medium text-text-primary shadow-sm' : 'text-text-secondary')}
+            >
+              {m === 'record' ? 'Record audio' : 'Type text'}
             </button>
-          ) : (
-            <button type="button" className={btnCls} onClick={start} disabled={!supported}>
-              <Mic className="size-4" /> Start recording
-            </button>
-          )}
-          {recording && <span className="flex items-center gap-1.5 text-xs text-red-500"><span className="size-2 animate-pulse rounded-full bg-red-500" />listening …</span>}
+          ))}
         </div>
-        {!supported && (
-          <p className="text-xs text-text-secondary">
-            This browser does not support speech recognition (use Chrome or Edge). You can also type or paste the text.
+
+        {mode === 'record' ? (
+          <div className="flex flex-col items-center gap-3 rounded-lg border border-border-light p-4">
+            {recording ? (
+              <button type="button" onClick={stop} className="flex size-16 items-center justify-center rounded-full bg-red-500 text-white shadow-lg hover:bg-red-600" aria-label="Stop recording">
+                <Square className="size-6 fill-current" />
+              </button>
+            ) : (
+              <button type="button" onClick={start} disabled={!supported || requestingMic || !!busy} className="flex size-16 items-center justify-center rounded-full bg-green-600 text-white shadow-lg hover:bg-green-700 disabled:opacity-50" aria-label="Start recording">
+                <Mic className="size-7" />
+              </button>
+            )}
+            <div className="text-sm text-text-secondary">
+              {recording ? (
+                <span className="flex items-center gap-1.5 text-red-500"><span className="size-2 animate-pulse rounded-full bg-red-500" />Recording {fmtSeconds(seconds)}</span>
+              ) : clip ? (
+                `Recording ready (${fmtSeconds(seconds)})`
+              ) : supported ? (
+                'Click to start recording'
+              ) : (
+                'Recording is not supported in this browser'
+              )}
+            </div>
+            {clipUrl && !recording && <audio controls src={clipUrl} className="w-full" />}
+          </div>
+        ) : (
+          <textarea
+            className={cn(inputCls, 'min-h-40 resize-y')}
+            placeholder="Type or paste your notes – they are structured the same way."
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+        )}
+
+        <div className="grid grid-cols-2 gap-2">
+          <input className={inputCls} placeholder="Title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input className={inputCls} placeholder="Your name (optional)" value={person} onChange={(e) => setPerson(e.target.value)} />
+        </div>
+        <StatusSelect value={status} onChange={setStatus} disabled={!!busy} />
+        {busy && (
+          <p className="flex items-center gap-1.5 text-xs text-text-secondary">
+            <Loader2 className="size-3.5 animate-spin" /> {busy}
           </p>
         )}
-        <textarea
-          className={cn(inputCls, 'min-h-40 resize-y')}
-          placeholder="The transcript appears here – you can correct it before saving."
-          value={interim ? `${text} ${interim}` : text}
-          onChange={(e) => setText(e.target.value)}
-          readOnly={recording}
-        />
         {error && <p className="text-xs text-red-500">{error}</p>}
         <div className="flex justify-end gap-2">
-          <button type="button" className={btnCls} onClick={onClose}>Cancel</button>
-          <button type="button" className={primaryCls} onClick={save} disabled={saving || recording || !text.trim()}>
-            {saving && <Loader2 className="size-4 animate-spin" />} Save to speech/
+          <button type="button" className={btnCls} onClick={onClose} disabled={!!busy}>Cancel</button>
+          <button type="button" className={primaryCls} onClick={save} disabled={!ready || !!busy}>
+            {busy && <Loader2 className="size-4 animate-spin" />} Transcribe &amp; save
           </button>
         </div>
       </div>
@@ -567,6 +643,7 @@ export default function KnowledgePanel() {
   const [dragging, setDragging] = useState(false);
   const [showFilters, setShowFilters] = useState(!isSmallScreen);
   const fileInput = useRef<HTMLInputElement>(null);
+  const viewer = useRef<HTMLIFrameElement>(null);
   const listScroll = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
@@ -605,7 +682,7 @@ export default function KnowledgePanel() {
   // The embedded viewer asks for the login token when saving
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      if (e.origin !== KB_ORIGIN || e.data?.type !== 'kb-token-request') return;
+      if (e.origin !== KB_ORIGIN || e.source !== viewer.current?.contentWindow || e.data?.type !== 'kb-token-request') return;
       (e.source as Window | null)?.postMessage({ type: 'kb-token', token: getTokenHeader() ?? '' }, e.origin);
     };
     window.addEventListener('message', onMessage);
@@ -1066,7 +1143,7 @@ export default function KnowledgePanel() {
                 <Trash2 className="size-4" />
               </button>
             </div>
-            <iframe key={`${viewSrc}:${sel?.status ?? ''}`} title={selected.path} src={viewSrc} className="min-h-0 w-full flex-1 border-0 bg-surface-primary" />
+            <iframe ref={viewer} key={`${viewSrc}:${sel?.status ?? ''}`} title={selected.path} src={viewSrc} className="min-h-0 w-full flex-1 border-0 bg-surface-primary" />
           </section>
         )}
       </div>
@@ -1113,9 +1190,9 @@ export default function KnowledgePanel() {
       {dialog === 'speech' && (
         <SpeechDialog
           onClose={() => setDialog(null)}
-          onSaved={(p) => {
+          onSaved={(p, warning) => {
             setDialog(null);
-            load();
+            void load().then(() => { if (warning) setError(warning); });
             setSelected({ path: p });
           }}
         />
