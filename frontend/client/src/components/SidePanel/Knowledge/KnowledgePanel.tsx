@@ -5,7 +5,7 @@
  * "knowledge"): real folders, automatic RAG index, viewer with highlighted passages and
  * three inputs (files, speech, interview).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { ReactNode } from 'react';
 import {
@@ -567,6 +567,11 @@ export default function KnowledgePanel() {
   const [dragging, setDragging] = useState(false);
   const [showFilters, setShowFilters] = useState(!isSmallScreen);
   const fileInput = useRef<HTMLInputElement>(null);
+  const listScroll = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (listScroll.current) listScroll.current.scrollTop = 0;
+  }, [folder, typ, person, sort, group]);
 
   const load = useCallback(async () => {
     try {
@@ -836,7 +841,7 @@ export default function KnowledgePanel() {
       }}
     >
       {/* Kopfzeile */}
-      <header className="flex flex-wrap items-center gap-3 border-b border-border-light px-4 py-2.5">
+      <header className="flex shrink-0 flex-wrap items-center gap-3 border-b border-border-light px-4 py-2.5">
         {isSmallScreen && <OpenSidebar testId="memory-open-sidebar" />}
         <button
           type="button"
@@ -948,10 +953,10 @@ export default function KnowledgePanel() {
         </aside>
 
         {/* Liste */}
-        <main className={cn('min-w-0 flex-col', selected ? 'hidden w-[22rem] flex-none md:flex' : 'flex flex-1')}>
+        <main className={cn('min-h-0 min-w-0 flex-col overflow-hidden', selected ? 'hidden w-[22rem] flex-none md:flex' : 'flex flex-1')}>
           {!visibleHits ? (
             <>
-              <div className="flex flex-wrap items-center gap-2 border-b border-border-light px-4 py-2 text-xs text-text-secondary">
+              <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border-light px-4 py-2 text-xs text-text-secondary">
                 <span className="mr-auto">
                   {filtered.length} document{filtered.length === 1 ? '' : 's'}
                   {folder && ` in “${folderLabel(folder)}”`}
@@ -965,7 +970,10 @@ export default function KnowledgePanel() {
                   {GROUPS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                 </select>
               </div>
-              <div className={cn('hidden grid-cols-[auto_minmax(0,1fr)_6rem_6rem_8rem_6rem] gap-x-3 border-b border-border-light px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary', !compact && 'md:grid')}>
+              <div
+                data-testid="memory-column-header"
+                className={cn('hidden shrink-0 grid-cols-[auto_minmax(0,1fr)_6rem_6rem_8rem_6rem] gap-x-3 border-b border-border-light bg-surface-primary px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary', !compact && 'md:grid')}
+              >
                 <span className="w-2" />
                 <span>Title</span>
                 <span>Type</span>
@@ -973,7 +981,11 @@ export default function KnowledgePanel() {
                 <span>Person</span>
                 <span>Date</span>
               </div>
-              <div className="min-h-0 flex-1 overflow-y-auto">
+              <div
+                ref={listScroll}
+                data-testid="memory-document-list"
+                className="isolate min-h-0 flex-1 overflow-x-hidden overflow-y-auto"
+              >
                 {grouped.map(([g, list]) => (
                   <div key={g || 'all'}>
                     {g && (
@@ -1028,8 +1040,8 @@ export default function KnowledgePanel() {
 
         {/* Lesebereich */}
         {selected && (
-          <section className="flex min-w-0 flex-1 flex-col border-l border-border-light">
-            <div className="flex items-center gap-2 border-b border-border-light px-3 py-2">
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-border-light">
+            <div className="flex shrink-0 items-center gap-2 border-b border-border-light px-3 py-2">
               <button type="button" onClick={() => setSelected(null)} className="rounded-md p-1 text-text-secondary hover:bg-surface-hover" title="Back to list" aria-label="Back to list">
                 <ArrowLeft className="size-4" />
               </button>
@@ -1070,6 +1082,7 @@ export default function KnowledgePanel() {
       {dialog === 'upload' && (
         <Modal title={localize('com_ui_upload_files')} onClose={() => !busy && setDialog(null)}>
           <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void upload(); }}>
+            <p className="text-xs text-text-secondary">{localize('com_ui_memory_upload_constraints')}</p>
             <div className="grid grid-cols-[minmax(0,1fr)_8rem] gap-3 text-xs font-semibold text-text-secondary">
               <span>{localize('com_ui_memory_file_name')}</span>
               <span>{localize('com_ui_memory_document_status')}</span>
