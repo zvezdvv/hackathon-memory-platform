@@ -25,7 +25,6 @@ import {
   PanelLeft,
   MessagesSquare,
   Mic,
-  RefreshCw,
   Search,
   Square,
   Trash2,
@@ -199,6 +198,8 @@ function Modal({
 
 const inputCls =
   'w-full rounded-lg border border-border-medium bg-surface-secondary px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:border-border-heavy focus:outline-none';
+const listSelectCls =
+  'rounded-md border border-border-light bg-surface-secondary py-1 ps-2 pe-7 text-xs text-text-primary';
 const btnCls =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-border-medium bg-surface-secondary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover disabled:opacity-50';
 const primaryCls =
@@ -976,9 +977,6 @@ export default function KnowledgePanel() {
             <MessagesSquare className="size-4" /> Interview
           </button>
         </div>
-        <button type="button" onClick={load} className="rounded-md p-1.5 text-text-secondary hover:bg-surface-hover" title="Refresh">
-          <RefreshCw className="size-4" />
-        </button>
         <button type="button" onClick={onClose} className="rounded-md p-1.5 text-text-secondary hover:bg-surface-hover" title="Close (Esc)" aria-label="Close Memory">
           <X className="size-5" />
         </button>
@@ -1052,10 +1050,10 @@ export default function KnowledgePanel() {
                   {typ && ` · ${typ}`}
                   {person && ` · ${person}`}
                 </span>
-                <select className="rounded-md border border-border-light bg-surface-secondary px-2 py-1 text-xs text-text-primary" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort">
+                <select className={listSelectCls} value={sort} onChange={(e) => setSort(e.target.value as SortKey)} aria-label="Sort">
                   {SORTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                 </select>
-                <select className="rounded-md border border-border-light bg-surface-secondary px-2 py-1 text-xs text-text-primary" value={group} onChange={(e) => setGroup(e.target.value as GroupKey)} aria-label="Group">
+                <select className={listSelectCls} value={group} onChange={(e) => setGroup(e.target.value as GroupKey)} aria-label="Group">
                   {GROUPS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                 </select>
               </div>
