@@ -3504,6 +3504,7 @@ export const interfaceSchema = z
     conversationIcons: z.boolean().optional(),
     /** Shows project navigation and controls in the chat history sidebar. Defaults to true. */
     sidebarProjects: z.boolean().optional(),
+    sidebarNewChat: z.boolean().optional(),
     mcpServers: mcpServersSchema.optional(),
     modelSelect: z.boolean().optional(),
     /** Set to false during a rolling upgrade, until every API replica supports title ownership and old title jobs drain. */

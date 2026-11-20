@@ -1,7 +1,7 @@
 # Smart City knowledge base ("Memory")
 
-Replaces the Memories tab in LibreChat with a full-screen overlay over a real file system,
-with metadata, RAG search and sources.
+The Memory workspace opens beside the LibreChat sidebar. It exposes documents and their
+metadata, RAG search and source links.
 
 ```
 LibreChat  ── Memory overlay (list, metadata, upload, speech, interview) ──► REST  /knowledge/api/*
@@ -22,19 +22,22 @@ knowledge/  (folder = single source of truth)  ──auto──► rag_api ─�
 | `knowledge/_guides/` | Markdown instructions that tell the interview assistant how to ask |
 | `knowledge/.state/` | Internal index state and text cache (do not touch) |
 
-Every file that lands in the folder is indexed automatically (status dot in the overlay:
-green = in RAG, yellow = keyword search only, blue = indexing).
+Uploads accept PDF, Markdown (`.md`, `.markdown`) and TXT. A document's status is stored
+under `knowledge/.state/` and can be changed in its viewer. Existing files default to Active.
+Only Active documents participate in semantic and keyword search, including via MCP.
 
 Metadata (title, type, ID, person, date, tags, place) is read from each Markdown file's
 front matter. A document whose front matter says it updates others (e.g. `note: "Updates
 N01, N06"` or the German `hinweis: "Aktualisiert … N01, N06"`) is detected as the newer
 version: search results and the overlay flag the older sources.
 
-## Embeddings
+## PDF processing and embeddings
 
-Without an embedding key only keyword search works. Set `OPENROUTER_KEY` in the `.env` in
-the repository root (used for chat and embeddings), then restart – the knowledge server
-re-embeds all files automatically:
+Set `OPENROUTER_KEY` in the repository's `.env`. The knowledge server sends the original
+PDF as a native file input to `openai/gpt-6.1-terra` and stores its transcription for the
+viewer and RAG index. The RAG API embeds the text using `mongodb/voyage-4`. Existing active PDFs
+are reprocessed automatically when the extraction version changes. Draft and inactive PDFs
+are processed when activated.
 
 ```bash
 docker compose up -d --force-recreate backend knowledge frontend

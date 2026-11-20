@@ -87,6 +87,7 @@ services:
       context: ./knowledge-server
     environment:
       KNOWLEDGE_ROOT: /data/knowledge
+      OPENROUTER_KEY: ${OPENROUTER_KEY:-user_provided}
       RAG_API_URL: http://backend:8000
       PUBLIC_URL: https://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}/knowledge
       JWT_SECRET: ${JWT_SECRET:?Run deploy/init-env.sh}

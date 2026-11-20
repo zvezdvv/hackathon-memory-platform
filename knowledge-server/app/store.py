@@ -18,10 +18,13 @@ import re
 import shutil
 import time
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 import httpx
 import jwt
+
+from .pdf import EXTRACTION_VERSION, MAX_PDF_BYTES, extract_pdf
 
 log = logging.getLogger("knowledge")
 
@@ -29,6 +32,7 @@ ROOT = Path(os.getenv("KNOWLEDGE_ROOT", "/data/knowledge")).resolve()
 STATE = ROOT / ".state"
 TEXT_CACHE = STATE / "text"
 INDEX_FILE = STATE / "index.json"
+STATUS_FILE = STATE / "document-status.json"
 RAG_API_URL = os.getenv("RAG_API_URL", "http://rag_api:8000").rstrip("/")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:8100").rstrip("/")
 JWT_SECRET = os.getenv("JWT_SECRET", "")
@@ -40,6 +44,9 @@ VERSION_FILE = STATE / "index_version"
 TOP_FOLDERS = ["files", "speech", "interviews", "_guides"]
 TEXT_EXT = {".md", ".markdown", ".txt", ".csv", ".json", ".yaml", ".yml"}
 EDITABLE_EXT = {".md", ".markdown", ".txt"}
+UPLOAD_EXT = EDITABLE_EXT | {".pdf"}
+DocumentStatus = Literal["active", "inactive", "draft"]
+DOCUMENT_STATUSES = {"active", "inactive", "draft"}
 GUIDE_FOLDER = "_guides"
 
 STOPWORDS = set(
@@ -147,12 +154,26 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
     return meta, body
 
 
+def validate_upload(filename: str, data: bytes) -> None:
+    ext = Path(filename).suffix.lower()
+    if ext not in UPLOAD_EXT:
+        raise ValueError("Only PDF, Markdown and TXT files are supported")
+    if ext == ".pdf":
+        if len(data) > MAX_PDF_BYTES:
+            raise ValueError("PDF files must be at most 50 MB")
+        if b"%PDF-" not in data[:1024]:
+            raise ValueError("The file is not a valid PDF")
+    elif b"\0" in data:
+        raise ValueError("Markdown and TXT uploads must contain plain text")
+
+
 # --------------------------------------------------------------------------- index
 
 
 class KnowledgeStore:
     def __init__(self) -> None:
         self.entries: dict[str, dict] = {}
+        self.document_statuses: dict[str, DocumentStatus] = {}
         self.wake = asyncio.Event()
         self.rag_ok: bool | None = None
         self.rag_error: str = ""
@@ -163,6 +184,8 @@ class KnowledgeStore:
         for folder in TOP_FOLDERS:
             (ROOT / folder).mkdir(parents=True, exist_ok=True)
         TEXT_CACHE.mkdir(parents=True, exist_ok=True)
+        if STATUS_FILE.exists():
+            self.document_statuses = json.loads(STATUS_FILE.read_text("utf-8"))
         if INDEX_FILE.exists():
             try:
                 self.entries = json.loads(INDEX_FILE.read_text("utf-8"))
@@ -181,8 +204,8 @@ class KnowledgeStore:
 
     def retry_unembedded(self) -> int:
         n = 0
-        for e in self.entries.values():
-            if e.get("status") in ("text_only", "error"):
+        for path, e in self.entries.items():
+            if self.is_active(path) and e.get("status") in ("text_only", "error"):
                 e["status"] = "pending"
                 n += 1
         self.wake.set()
@@ -200,6 +223,47 @@ class KnowledgeStore:
         tmp = INDEX_FILE.with_suffix(".tmp")
         tmp.write_text(json.dumps(self.entries, ensure_ascii=False, indent=1), "utf-8")
         tmp.replace(INDEX_FILE)
+
+    def document_status(self, path: str) -> DocumentStatus:
+        return self.document_statuses.get(path, "active")
+
+    def is_active(self, path: str) -> bool:
+        return self.document_status(path) == "active" and (ROOT / path).is_file()
+
+    def _save_statuses(self, statuses: dict[str, DocumentStatus]) -> None:
+        tmp = STATUS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(statuses, ensure_ascii=False, indent=1), "utf-8")
+        tmp.replace(STATUS_FILE)
+        self.document_statuses = statuses
+
+    def _set_status(self, path: str, status: DocumentStatus) -> None:
+        if status not in DOCUMENT_STATUSES:
+            raise ValueError("Choose Active, Not Active or Draft")
+        if self.document_status(path) == status:
+            return
+        statuses = dict(self.document_statuses)
+        if status == "active":
+            statuses.pop(path, None)
+        else:
+            statuses[path] = status
+        self._save_statuses(statuses)
+
+    def set_status(self, path: str, status: DocumentStatus) -> None:
+        p = safe_path(path)
+        if not p.is_file():
+            raise FileNotFoundError(path)
+        self._set_status(rel(p), status)
+        entry = self.entries.get(rel(p))
+        if status == "active" and entry and entry.get("status") in ("error", "text_only"):
+            entry["status"] = "pending"
+        self.wake.set()
+
+    def index_status(self, path: str, entry: dict) -> str:
+        if self.document_status(path) != "active":
+            return "excluded"
+        if Path(path).suffix.lower() == ".pdf" and entry.get("pdf_version") != EXTRACTION_VERSION:
+            return "error" if entry.get("status") == "error" else "pending"
+        return entry.get("status", "pending")
 
     # ---- rag_api
     def _headers(self) -> dict:
@@ -249,7 +313,7 @@ class KnowledgeStore:
                 entry = self.entries.pop(relpath)
                 changed = True
                 (TEXT_CACHE / f"{entry['id']}.txt").unlink(missing_ok=True)
-                if entry.get("status") == "indexed":
+                if entry.get("status") == "indexed" or entry.get("was_indexed"):
                     try:
                         await self._rag("DELETE", "/documents", json=[entry["id"]])
                     except Exception:  # noqa: BLE001
@@ -258,19 +322,19 @@ class KnowledgeStore:
         todo = []
         for relpath, st in found.items():
             entry = self.entries.get(relpath)
-            if entry and entry.get("mtime") == st.st_mtime and entry.get("size") == st.st_size:
-                if entry.get("status") != "pending":
-                    continue
-            self.entries[relpath] = {
-                "id": file_id_for(relpath),
-                "mtime": st.st_mtime,
-                "size": st.st_size,
-                "status": "pending",
-                "error": "",
-                "was_indexed": bool(entry and entry.get("status") == "indexed"),
-            }
-            todo.append(relpath)
-            changed = True
+            if not entry or entry.get("mtime") != st.st_mtime or entry.get("size") != st.st_size:
+                entry = {
+                    "id": file_id_for(relpath),
+                    "mtime": st.st_mtime,
+                    "size": st.st_size,
+                    "status": "pending",
+                    "error": "",
+                    "was_indexed": bool(entry and (entry.get("status") == "indexed" or entry.get("was_indexed"))),
+                }
+                self.entries[relpath] = entry
+                changed = True
+            if self.is_active(relpath) and self.index_status(relpath, entry) == "pending":
+                todo.append(relpath)
         if changed:
             self._save()
         for relpath in todo:
@@ -279,14 +343,27 @@ class KnowledgeStore:
 
     async def _process(self, relpath: str) -> None:
         entry = self.entries.get(relpath)
-        if not entry:
+        if not entry or not self.is_active(relpath):
             return
         p = ROOT / relpath
         data = p.read_bytes()
+        filename = p.name
+        pdf = p.suffix.lower() == ".pdf"
+        cache = TEXT_CACHE / f"{entry['id']}.txt"
+        entry["was_indexed"] = entry.get("status") == "indexed" or entry.get("was_indexed", False)
+        entry["status"] = "pending"
+        entry["error"] = ""
         # 1) Text extrahieren (für Vorschau, Fundstellen und Stichwortsuche)
         text = ""
         try:
-            if p.suffix.lower() in TEXT_EXT:
+            if pdf:
+                if entry.get("pdf_version") == EXTRACTION_VERSION and cache.exists():
+                    text = cache.read_text("utf-8")
+                else:
+                    text = await extract_pdf(filename, data)
+                data = text.encode("utf-8")
+                filename = f"{p.stem}.txt"
+            elif p.suffix.lower() in TEXT_EXT:
                 text = data.decode("utf-8", errors="replace")
             else:
                 r = await self._rag(
@@ -299,18 +376,34 @@ class KnowledgeStore:
                     entry["error"] = f"Text extraction: HTTP {r.status_code}"
         except Exception as e:  # noqa: BLE001
             entry["error"] = f"Text extraction: {e}"
-        (TEXT_CACHE / f"{entry['id']}.txt").write_text(text, "utf-8")
+        if pdf and not text:
+            entry["status"] = "error"
+            log.warning("%s -> %s", relpath, entry["error"])
+            return
+        cache.write_text(text, "utf-8")
+        if pdf:
+            entry["pdf_version"] = EXTRACTION_VERSION
+        if not self.is_active(relpath):
+            return
 
         # 2) In pgvector einbetten
         try:
-            if entry.pop("was_indexed", False):
-                await self._rag("DELETE", "/documents", json=[entry["id"]])
+            if entry.get("was_indexed"):
+                deleted = await self._rag("DELETE", "/documents", json=[entry["id"]])
+                if deleted.status_code != 404:
+                    deleted.raise_for_status()
+            if not self.is_active(relpath):
+                return
+            # The write may succeed even if its response is lost. Clear it before a retry.
+            entry["was_indexed"] = True
+            self._save()
             r = await self._rag(
-                "POST", "/embed", data={"file_id": entry["id"]}, files={"file": (p.name, data)}
+                "POST", "/embed", data={"file_id": entry["id"]}, files={"file": (filename, data)}
             )
             body = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
             if r.status_code < 300 and (not isinstance(body, dict) or body.get("status", True)):
                 entry["status"] = "indexed"
+                entry.pop("was_indexed", None)
                 entry["error"] = ""
                 self.rag_ok, self.rag_error = True, ""
             else:
@@ -327,16 +420,20 @@ class KnowledgeStore:
     def get_text(self, relpath: str) -> str:
         p = safe_path(relpath)
         if p.suffix.lower() in TEXT_EXT:
-            return p.read_text("utf-8", errors="replace")
-        entry = self.entries.get(relpath)
+            return p.read_text("utf-8-sig", errors="replace")
+        entry = self.entries.get(rel(p))
         if entry:
+            if p.suffix.lower() == ".pdf" and entry.get("pdf_version") != EXTRACTION_VERSION:
+                return ""
             cache = TEXT_CACHE / f"{entry['id']}.txt"
             if cache.exists():
                 return cache.read_text("utf-8")
         return ""
 
-    def tree(self, relpath: str = "") -> dict:
+    def tree(self, relpath: str = "", active_only: bool = False) -> dict:
         base = safe_path(relpath)
+        if active_only and base.is_file() and not self.is_active(rel(base)):
+            raise FileNotFoundError(relpath)
 
         def node(p: Path) -> dict:
             r = rel(p) if p != ROOT else ""
@@ -344,7 +441,7 @@ class KnowledgeStore:
                 children = [
                     node(c)
                     for c in sorted(p.iterdir(), key=lambda c: (c.is_file(), c.name.lower()))
-                    if not c.name.startswith(".")
+                    if not c.name.startswith(".") and (not active_only or c.is_dir() or self.is_active(rel(c)))
                 ]
                 return {"name": p.name if r else "knowledge", "path": r, "type": "dir", "children": children}
             entry = self.entries.get(r, {})
@@ -355,7 +452,8 @@ class KnowledgeStore:
                 "type": "file",
                 "size": st.st_size,
                 "mtime": st.st_mtime,
-                "status": entry.get("status", "pending"),
+                "status": self.index_status(r, entry),
+                "document_status": self.document_status(r),
                 "error": entry.get("error", ""),
             }
 
@@ -363,8 +461,9 @@ class KnowledgeStore:
 
     def status(self) -> dict:
         counts: dict[str, int] = {}
-        for e in self.entries.values():
-            counts[e["status"]] = counts.get(e["status"], 0) + 1
+        for path, entry in self.entries.copy().items():
+            status = self.index_status(path, entry)
+            counts[status] = counts.get(status, 0) + 1
         return {"files": len(self.entries), "counts": counts, "rag_ok": self.rag_ok, "rag_error": self.rag_error}
 
     def people(self) -> list[dict]:
@@ -386,6 +485,8 @@ class KnowledgeStore:
         base = ROOT / GUIDE_FOLDER
         out = []
         for f in sorted(base.glob("*.md")) if base.exists() else []:
+            if not self.is_active(rel(f)):
+                continue
             meta, body = split_frontmatter(f.read_text("utf-8", errors="replace"))
             title = meta.get("title") or meta.get("titel") or f.stem
             out.append({"path": rel(f), "title": title, "beschreibung": meta.get("description") or meta.get("beschreibung", "")})
@@ -464,7 +565,8 @@ class KnowledgeStore:
                     "ext": ext.lstrip("."),
                     "size": p.stat().st_size,
                     "mtime": p.stat().st_mtime,
-                    "status": entry.get("status", "pending"),
+                    "status": self.index_status(path, entry),
+                    "document_status": self.document_status(path),
                     "id": doc_id,
                     "title": title,
                     "typ": typ,
@@ -490,7 +592,7 @@ class KnowledgeStore:
         """
         updates: dict[str, list[dict]] = {}
         ids: dict[str, str] = {}
-        for path in self.entries:
+        for path in list(self.entries):
             if Path(path).suffix.lower() not in (".md", ".markdown"):
                 continue
             try:
@@ -500,6 +602,8 @@ class KnowledgeStore:
             doc_id = meta.get("id", "").strip()
             if doc_id:
                 ids[path] = doc_id
+            if not self.is_active(path):
+                continue
             note = " ".join(meta.get(k, "") for k in ("hinweis", "aktualisiert", "ersetzt", "note", "updates", "supersedes"))
             if not re.search(r"aktualisier|ersetzt|gilt dieser stand|update|supersede", note.lower()):
                 continue
@@ -519,13 +623,13 @@ class KnowledgeStore:
                 return False
             if not include_guides and relpath.startswith(GUIDE_FOLDER + "/"):
                 return False
-            return True
+            return self.is_active(relpath)
 
         candidates = {p: e for p, e in self.entries.items() if allowed(p)}
-        by_id = {e["id"]: p for p, e in candidates.items()}
+        by_id = {e["id"]: p for p, e in candidates.items() if self.index_status(p, e) == "indexed"}
         hits: list[dict] = []
         mode = "semantic"
-        ids = [e["id"] for e in candidates.values() if e.get("status") == "indexed"]
+        ids = list(by_id)
         if ids:
             try:
                 r = await self._rag(
@@ -536,7 +640,7 @@ class KnowledgeStore:
                         doc, score = (item[0], item[1]) if isinstance(item, list) else (item, None)
                         meta = doc.get("metadata", {}) or {}
                         path = by_id.get(meta.get("file_id"))
-                        if not path:
+                        if not path or not allowed(path):
                             continue
                         hits.append(
                             {
@@ -548,7 +652,7 @@ class KnowledgeStore:
                         )
             except Exception as e:  # noqa: BLE001
                 log.warning("Semantic search failed: %s", e)
-        keyword_hits = self._keyword_search(query, list(candidates), k * 2)
+        keyword_hits = self._keyword_search(query, [p for p in candidates if allowed(p)], k * 2)
         if hits:
             # Hybrid: semantische Treffer und Stichwort-Treffer per Reciprocal Rank Fusion mischen.
             # So finden auch exakte Begriffe (Namen, Straßen, Paragraphen) zuverlässig ihre Quelle.
@@ -625,28 +729,50 @@ class KnowledgeStore:
         return out
 
     # ---- schreiben
-    def write_text(self, relpath: str, content: str, overwrite: bool = False) -> str:
+    def write_text(
+        self, relpath: str, content: str, overwrite: bool = False, document_status: DocumentStatus = "active"
+    ) -> str:
         p = safe_path(relpath)
-        if p.suffix.lower() not in EDITABLE_EXT:
+        if not p.suffix:
             p = p.with_suffix(".md")
+        if p.suffix.lower() not in EDITABLE_EXT:
+            raise ValueError("Only Markdown and TXT files can be written as text")
         if p.parent == ROOT:
             raise ValueError("Please specify a folder, e.g. files/…")
         p.parent.mkdir(parents=True, exist_ok=True)
         if not overwrite:
             p = unique_path(p)
-        p.write_text(content, "utf-8")
-        self.wake.set()
-        return rel(p)
+        status = self.document_status(rel(p)) if overwrite and p.exists() else document_status
+        return self._write(p, content.encode("utf-8"), status)
 
-    def save_upload(self, folder: str, filename: str, data: bytes) -> str:
+    def save_upload(self, folder: str, filename: str, data: bytes, document_status: DocumentStatus = "active") -> str:
+        validate_upload(filename, data)
         d = safe_path(folder or "files")
         if d == ROOT:
             d = ROOT / "files"
         d.mkdir(parents=True, exist_ok=True)
         p = unique_path(d / safe_filename(filename))
-        p.write_bytes(data)
+        return self._write(p, data, document_status)
+
+    def _write(self, path: Path, data: bytes, status: DocumentStatus) -> str:
+        relative = rel(path)
+        previous = self.document_status(relative)
+        self._set_status(relative, status)
+        temporary = path.with_name(f".{path.name}.uploading")
+        try:
+            temporary.write_bytes(data)
+            temporary.replace(path)
+        except OSError:
+            temporary.unlink(missing_ok=True)
+            self._set_status(relative, previous)
+            raise
+        if relative not in self.entries:
+            stat = path.stat()
+            self.entries[relative] = {
+                "id": file_id_for(relative), "mtime": stat.st_mtime, "size": stat.st_size, "status": "pending",
+            }
         self.wake.set()
-        return rel(p)
+        return relative
 
     def make_dir(self, relpath: str) -> str:
         p = safe_path(relpath)
@@ -661,9 +787,15 @@ class KnowledgeStore:
             shutil.rmtree(p)
         elif p.exists():
             p.unlink()
+        prefix = rel(p)
+        statuses = {k: v for k, v in self.document_statuses.items() if k != prefix and not k.startswith(prefix + "/")}
+        if statuses != self.document_statuses:
+            self._save_statuses(statuses)
         self.wake.set()
 
-    def save_note(self, title: str, text: str, person: str = "", source: str = "speech") -> str:
+    def save_note(
+        self, title: str, text: str, person: str = "", source: str = "speech", document_status: DocumentStatus = "active"
+    ) -> str:
         meta = {
             "title": title or "Voice note",
             "type": "voice note",
@@ -672,9 +804,12 @@ class KnowledgeStore:
             "source": source,
         }
         body = frontmatter(meta) + f"# {meta['title']}\n\n{text.strip()}\n"
-        return self.write_text(f"speech/{today()}_{slugify(title or 'note')}.md", body)
+        return self.write_text(f"speech/{today()}_{slugify(title or 'note')}.md", body, document_status=document_status)
 
-    def save_interview(self, person: str, topic: str, content: str, interviewer: str = "", guide: str = "") -> str:
+    def save_interview(
+        self, person: str, topic: str, content: str, interviewer: str = "", guide: str = "",
+        document_status: DocumentStatus = "active",
+    ) -> str:
         meta = {
             "title": f"Interview {person} – {topic}",
             "type": "interview",
@@ -690,7 +825,7 @@ class KnowledgeStore:
         if not body.lstrip().startswith("#"):
             body = f"# {meta['title']}\n\n{body}"
         relpath = f"interviews/{slugify(person)}/{today()}_{slugify(topic)}.md"
-        return self.write_text(relpath, frontmatter(meta) + body + "\n")
+        return self.write_text(relpath, frontmatter(meta) + body + "\n", document_status=document_status)
 
 
 store = KnowledgeStore()

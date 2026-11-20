@@ -4,7 +4,8 @@ import { ChevronDown } from 'lucide-react';
 import { DropdownPopup, buttonVariants } from '@librechat/client';
 import type { NavLink } from '~/common';
 import type * as t from '~/common';
-import { useActivePanel, resolveActivePanel } from '~/Providers';
+import { useLocation } from 'react-router-dom';
+import { DEFAULT_PANEL, MEMORY_PANEL, useActivePanel, resolveActivePanel } from '~/Providers';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 
@@ -17,17 +18,21 @@ function Switcher({
   links,
   onLeaveInsights,
   onNavigate,
+  onRepeatHistory,
   routeActiveId,
 }: {
   links: NavLink[];
   onLeaveInsights?: () => void;
-  onNavigate?: () => void;
+  onNavigate?: (afterSlide?: () => void) => void;
+  onRepeatHistory?: () => void;
   routeActiveId?: string;
 }) {
   const localize = useLocalize();
   const menuId = useId();
   const [isOpen, setIsOpen] = useState(false);
   const { active, setActive } = useActivePanel();
+  const { pathname } = useLocation();
+  const existingChat = pathname.startsWith('/c/') && pathname !== '/c/new';
 
   const activeId = routeActiveId ?? resolveActivePanel(active, links);
   const activeLink = links.find((link) => link.id === activeId);
@@ -46,13 +51,20 @@ function Switcher({
             onNavigate?.();
             return;
           }
+          if (link.id === DEFAULT_PANEL && activeId === DEFAULT_PANEL && existingChat && onRepeatHistory) {
+            onRepeatHistory();
+            return;
+          }
           setActive(link.id);
+          if (link.id === MEMORY_PANEL) {
+            onNavigate?.();
+          }
           if (routeActiveId) {
             onLeaveInsights?.();
           }
         },
       })),
-    [links, activeId, localize, onLeaveInsights, onNavigate, routeActiveId, setActive],
+    [links, activeId, localize, onLeaveInsights, onNavigate, onRepeatHistory, routeActiveId, setActive, existingChat],
   );
 
   if (!activeLink) {

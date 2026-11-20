@@ -2,9 +2,10 @@ import { memo, useCallback, Suspense } from 'react';
 import { SquarePen } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 import { Skeleton, Sidebar, Button, TooltipAnchor } from '@librechat/client';
+import type { MouseEventHandler } from 'react';
 import type { NavLink } from '~/common';
 import { useShortcutAriaKey, useShortcutHint } from '~/hooks/useKeyboardShortcuts';
-import { useActivePanel, resolveActivePanel, DEFAULT_PANEL } from '~/Providers';
+import { DEFAULT_PANEL, MEMORY_PANEL, useActivePanel, resolveActivePanel } from '~/Providers';
 import AgentMarketplaceButton from '~/components/Nav/AgentMarketplaceButton';
 import { CLOSE_SIDEBAR_ID } from '~/components/Chat/Menus/OpenSidebar';
 import useDirection, { inlineSide } from '~/hooks/Nav/useDirection';
@@ -15,24 +16,14 @@ import { useLocalize } from '~/hooks';
 const AccountSettings = lazyWithRecovery(() => import('~/components/Nav/AccountSettings'));
 
 const NewChatButton = memo(function NewChatButton({
-  setActive,
-  switchToHistory,
+  onClick,
 }: {
-  setActive: (id: string) => void;
-  switchToHistory: boolean;
+  onClick: MouseEventHandler<HTMLAnchorElement>;
 }) {
   const localize = useLocalize();
   const tooltipSide = inlineSide(useDirection(), 'end');
   const tooltipDescription = useShortcutHint('newChat', localize('com_ui_new_chat'));
   const ariaKey = useShortcutAriaKey('newChat');
-
-  const handlePanelSwitch = useCallback(() => {
-    if (switchToHistory) {
-      setActive(DEFAULT_PANEL);
-    }
-  }, [switchToHistory, setActive]);
-
-  const { handleNewChatClick } = useNewChat({ onNewChat: handlePanelSwitch });
 
   return (
     <TooltipAnchor
@@ -45,7 +36,7 @@ const NewChatButton = memo(function NewChatButton({
           aria-label={localize('com_ui_new_chat')}
           aria-keyshortcuts={ariaKey}
           className="hover:bg-surface-nav-hover flex h-9 w-9 items-center justify-center rounded-lg transition-colors"
-          onClick={handleNewChatClick}
+          onClick={onClick}
         >
           <SquarePen className="text-text-primary h-5 w-5" />
         </a>
@@ -63,6 +54,7 @@ const NavIconButton = memo(function NavIconButton({
   onCollapse,
   onNavigate,
   onLeaveInsights,
+  onRepeat,
 }: {
   link: NavLink;
   isActive: boolean;
@@ -72,6 +64,7 @@ const NavIconButton = memo(function NavIconButton({
   onCollapse?: () => void;
   onNavigate?: () => void;
   onLeaveInsights?: () => void;
+  onRepeat?: () => void;
 }) {
   const localize = useLocalize();
   const tooltipSide = inlineSide(useDirection(), 'end');
@@ -84,7 +77,13 @@ const NavIconButton = memo(function NavIconButton({
         return;
       }
       if (isActive && expanded) {
-        onCollapse?.();
+        if (link.id === MEMORY_PANEL) {
+          setActive(DEFAULT_PANEL);
+        } else if (onRepeat) {
+          onRepeat();
+        } else {
+          onCollapse?.();
+        }
         return;
       }
       if (!isActive) {
@@ -96,7 +95,7 @@ const NavIconButton = memo(function NavIconButton({
         onLeaveInsights?.();
       }
     },
-    [link, isActive, setActive, expanded, onExpand, onCollapse, onNavigate, onLeaveInsights],
+    [link, isActive, setActive, expanded, onExpand, onCollapse, onNavigate, onLeaveInsights, onRepeat],
   );
 
   return (
@@ -129,6 +128,7 @@ function ExpandedPanel({
   onNavigate,
   onLeaveInsights,
   switchToHistory,
+  showNewChat = true,
 }: {
   links: NavLink[];
   expanded?: boolean;
@@ -137,6 +137,7 @@ function ExpandedPanel({
   onNavigate?: () => void;
   onLeaveInsights?: () => void;
   switchToHistory: boolean;
+  showNewChat?: boolean;
 }) {
   const localize = useLocalize();
   const tooltipSide = inlineSide(useDirection(), 'end');
@@ -144,6 +145,11 @@ function ExpandedPanel({
   const { active, setActive } = useActivePanel();
   const effectiveActive = resolveActivePanel(active, links);
   const isInsightsRoute = location.pathname.startsWith('/insights');
+  const existingChat = location.pathname.startsWith('/c/') && location.pathname !== '/c/new';
+  const handlePanelSwitch = useCallback(() => {
+    if (switchToHistory) setActive(DEFAULT_PANEL);
+  }, [switchToHistory, setActive]);
+  const { startNewChat, handleNewChatClick } = useNewChat({ onNewChat: handlePanelSwitch });
 
   const toggleLabel = expanded ? 'com_nav_close_sidebar' : 'com_nav_open_sidebar';
   const toggleClick = expanded ? onCollapse : onExpand;
@@ -171,7 +177,7 @@ function ExpandedPanel({
           </Button>
         }
       />
-      <NewChatButton setActive={setActive} switchToHistory={switchToHistory} />
+      {showNewChat && <NewChatButton onClick={handleNewChatClick} />}
       <AgentMarketplaceButton />
       <div className="border-border-inset mx-2 border-b" />
       <div className="flex flex-col gap-1 overflow-y-auto">
@@ -179,6 +185,7 @@ function ExpandedPanel({
           <NavIconButton
             key={link.id}
             link={link}
+            onRepeat={!showNewChat && link.id === DEFAULT_PANEL && existingChat ? startNewChat : undefined}
             isActive={
               link.id === 'insights'
                 ? isInsightsRoute

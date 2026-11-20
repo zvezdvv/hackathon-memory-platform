@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, startTransition } from 'react';
+import { useAtomValue } from 'jotai';
 import { useRecoilValue } from 'recoil';
 import { Outlet } from 'react-router-dom';
 import { useMediaQuery } from '@librechat/client';
@@ -22,6 +23,9 @@ import {
   SetConvoProvider,
   FileMapContext,
   MCPAppsPolicyProvider,
+  activePanelAtom,
+  MEMORY_PANEL,
+  MEMORY_PANE_ID,
 } from '~/Providers';
 import {
   UnifiedSidebar,
@@ -100,6 +104,7 @@ function RootLayout() {
    *  swipe. Opting in narrows it and gives the strip a dismiss target. */
   const drawerStrip = useRecoilValue(store.mobileDrawerStrip);
   const newChatSwitchToHistory = useRecoilValue(store.newChatSwitchToHistory);
+  const memoryOpen = useAtomValue(activePanelAtom) === MEMORY_PANEL;
   const paneRef = useRef<HTMLDivElement>(null);
   /** Keyed off the committed state rather than the scrim's own click, because
    *  the header button, Escape, conversation selection and the bottom bar all
@@ -205,6 +210,7 @@ function RootLayout() {
                     <UnifiedSidebar
                       isSliding={isSliding}
                       switchToHistory={newChatSwitchToHistory}
+                      showNewChat={config?.interface != null && config.interface.sidebarNewChat !== false}
                     />
                     <div
                       ref={paneRef}
@@ -225,8 +231,11 @@ function RootLayout() {
                         ready={isConfigReady && configError == null}
                         userId={user?.id}
                       >
-                        <Outlet />
+                        <div className="contents" inert={memoryOpen ? '' : undefined}>
+                          <Outlet />
+                        </div>
                       </MCPAppsPolicyProvider>
+                      <div id={MEMORY_PANE_ID} className="absolute inset-0 z-10 empty:hidden" />
                     </div>
                     {/* Without the strip the scrim exists only for the travel:
                       through a close that began while the strip was still on

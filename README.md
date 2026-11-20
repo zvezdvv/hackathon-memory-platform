@@ -36,7 +36,7 @@ docker compose logs --tail 80 frontend backend proxy
 
 ## Memory (knowledge base)
 
-The **Memory** tab in the LibreChat sidebar opens a full-screen overlay over `knowledge/` with metadata, filters, sorting, grouping and a reading pane (code in `frontend/client/src/components/SidePanel/Knowledge/KnowledgePanel.tsx`, server in `knowledge-server/`). That is why the `frontend` service now builds from `frontend/` instead of using the official image.
+The **Memory** tab opens the document workspace beside the LibreChat sidebar. It shows metadata, filters, sorting, grouping and a reading pane for files under `knowledge/`.
 
 | Folder | Content |
 |---|---|
@@ -45,7 +45,7 @@ The **Memory** tab in the LibreChat sidebar opens a full-screen overlay over `kn
 | `knowledge/interviews/<person>/` | Interview protocols |
 | `knowledge/_guides/` | Markdown guides that tell the interview assistant how to ask |
 
-Every file in `knowledge/` is indexed automatically through the RAG API (green dot = embedded, yellow = keyword search only, e.g. while `OPENROUTER_KEY` is empty). Chat answers link their sources to `https://<public-host>/knowledge/view?…`, which opens the document with the passage highlighted.
+Memory accepts PDF, Markdown and TXT. Active documents are indexed automatically. For PDFs, OpenRouter sends the original file directly to GPT-6.1 Terra and the RAG API embeds the returned transcript. Not Active and Draft documents stay in the list and are excluded from search. Chat citations open the document with the passage highlighted.
 
 The `knowledge` service also exposes an MCP server that LibreChat uses internally (`http://knowledge:8100/mcp/`, blocked at the proxy). Two assistants in the model selector use it: **Smart City Assistant** (answers with inline source links) and **Knowledge Interview** (asks targeted questions and saves the protocol). Uploads, edits and deletions require a LibreChat login.
 

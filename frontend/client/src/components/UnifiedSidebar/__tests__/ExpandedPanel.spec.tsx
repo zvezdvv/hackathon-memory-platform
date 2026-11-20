@@ -106,6 +106,8 @@ function renderPanel({
   onNavigate,
   initialPanel = DEFAULT_PANEL,
   switchToHistory = true,
+  showNewChat = true,
+  path = '/',
 }: {
   expanded?: boolean;
   links?: NavLink[];
@@ -114,11 +116,13 @@ function renderPanel({
   onNavigate?: jest.Mock;
   initialPanel?: string;
   switchToHistory?: boolean;
+  showNewChat?: boolean;
+  path?: string;
 } = {}) {
   getDefaultStore().set(activePanelAtom, initialPanel);
 
   const result = render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <QueryClientProvider client={createQueryClient()}>
         <RecoilRoot>
           <ActivePanelProvider>
@@ -129,6 +133,7 @@ function renderPanel({
               onExpand={onExpand}
               onNavigate={onNavigate}
               switchToHistory={switchToHistory}
+              showNewChat={showNewChat}
             />
           </ActivePanelProvider>
         </RecoilRoot>
@@ -242,6 +247,14 @@ describe('ExpandedPanel', () => {
   });
 
   describe('NewChatButton panel switch', () => {
+    it('starts a new chat from Chat History when its separate button is hidden', () => {
+      renderPanel({ showNewChat: false, path: '/c/existing' });
+
+      expect(screen.queryByTestId('new-chat-button')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByTestId('nav-panel-conversations'));
+      expect(mockNewConversation).toHaveBeenCalledTimes(1);
+    });
+
     it('switches to chat history panel on new chat click when setting is enabled', () => {
       renderPanel({ expanded: true, initialPanel: 'prompts' });
 

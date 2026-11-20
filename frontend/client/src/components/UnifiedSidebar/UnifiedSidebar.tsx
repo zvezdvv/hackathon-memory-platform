@@ -54,11 +54,13 @@ function SidebarChatProvider({ children }: { children: ReactNode }) {
 function UnifiedSidebar({
   isSliding = false,
   switchToHistory,
+  showNewChat,
 }: {
   isSliding?: boolean;
   /** The user's "new chat returns to the chat list" preference. App-global
    *  shell state the sidebar only reads, so the host passes it in. */
   switchToHistory: boolean;
+  showNewChat?: boolean;
 }) {
   const localize = useLocalize();
   const location = useLocation();
@@ -264,6 +266,7 @@ function UnifiedSidebar({
             onClose={handleCollapse}
             onNewChat={handleCollapse}
             switchToHistory={switchToHistory}
+            showNewChat={showNewChat}
             onLeaveInsights={handleLeaveInsights}
             routeActiveId={isInsightsRoute ? 'insights' : undefined}
           />
@@ -313,6 +316,7 @@ function UnifiedSidebar({
             onExpand={handlePanelExpand}
             onLeaveInsights={handleLeaveInsights}
             switchToHistory={switchToHistory}
+            showNewChat={showNewChat}
             onResizeStart={handleResizeStart}
             onResizeKeyboard={handleResizeKeyboard}
           />

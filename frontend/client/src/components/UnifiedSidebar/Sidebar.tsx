@@ -15,6 +15,7 @@ function Sidebar({
   onExpand,
   onLeaveInsights,
   switchToHistory,
+  showNewChat,
   onResizeStart,
   onResizeKeyboard,
 }: {
@@ -27,6 +28,7 @@ function Sidebar({
   onExpand: () => void;
   onLeaveInsights: () => void;
   switchToHistory: boolean;
+  showNewChat?: boolean;
   onResizeStart: (e: React.MouseEvent<HTMLElement>) => void;
   onResizeKeyboard: (direction: 'shrink' | 'grow') => void;
 }) {
@@ -40,6 +42,7 @@ function Sidebar({
           onExpand={onExpand}
           onLeaveInsights={onLeaveInsights}
           switchToHistory={switchToHistory}
+          showNewChat={showNewChat}
         />
         <nav
           className={cn(

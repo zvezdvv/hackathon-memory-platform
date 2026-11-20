@@ -1,14 +1,23 @@
-import { memo, Suspense, useEffect, useRef } from 'react';
+import { memo, Suspense, useCallback, useEffect, useRef } from 'react';
 import { Button, Sidebar, Skeleton } from '@librechat/client';
+import type { ComponentProps } from 'react';
 import type { NavLink } from '~/common';
 import { CLOSE_SIDEBAR_ID } from '~/components/Chat/Menus/OpenSidebar';
 import { useShortcutAriaKey } from '~/hooks/useKeyboardShortcuts';
+import useNewChat from '~/hooks/Conversations/useNewChat';
 import { lazyWithRecovery } from '~/lib/assets/lazy';
 import { useLocalize } from '~/hooks';
 import Switcher from './Switcher';
 import NewChat from './NewChat';
 
 const AccountSettings = lazyWithRecovery(() => import('~/components/Nav/AccountSettings'));
+
+function HistorySwitcher(props: ComponentProps<typeof Switcher>) {
+  const { startNewChat } = useNewChat();
+  const { onNavigate } = props;
+  const start = useCallback(() => onNavigate?.(startNewChat), [onNavigate, startNewChat]);
+  return <Switcher {...props} onRepeatHistory={start} />;
+}
 
 /**
  * At full width there is nothing beside the drawer left to tap, so this close
@@ -24,6 +33,7 @@ function Header({
   onClose,
   onNewChat,
   switchToHistory,
+  showNewChat = true,
   onLeaveInsights,
   routeActiveId,
 }: {
@@ -32,12 +42,14 @@ function Header({
   onClose: () => void;
   onNewChat: (afterSlide?: () => void) => void;
   switchToHistory: boolean;
+  showNewChat?: boolean;
   onLeaveInsights?: () => void;
   routeActiveId?: string;
 }) {
   const localize = useLocalize();
   const toggleSidebarAriaKey = useShortcutAriaKey('toggleSidebar');
   const closeRef = useRef<HTMLButtonElement>(null);
+  const PanelSwitcher = showNewChat ? Switcher : HistorySwitcher;
 
   /** Opening makes the chat pane inert, so keyboard/AT focus must move into
    * the drawer. The commit itself drives the handoff — every opener (button,
@@ -74,13 +86,13 @@ function Header({
       >
         <Sidebar className="icon-md rtl:-scale-x-100" aria-hidden="true" />
       </Button>
-      <Switcher
+      <PanelSwitcher
         links={links}
         onLeaveInsights={onLeaveInsights}
         onNavigate={onClose}
         routeActiveId={routeActiveId}
       />
-      <NewChat onNewChat={onNewChat} switchToHistory={switchToHistory} />
+      {showNewChat && <NewChat onNewChat={onNewChat} switchToHistory={switchToHistory} />}
       <Suspense fallback={<Skeleton className="size-9 rounded-lg" />}>
         <AccountSettings collapsed />
       </Suspense>

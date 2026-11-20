@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { Spinner } from '@librechat/client';
 import { EModelEndpoint } from 'librechat-data-provider';
 import type { NavLink } from '~/common';
-import { useActivePanel, resolveActivePanel } from '~/Providers';
+import { DEFAULT_PANEL, MEMORY_PANEL, useActivePanel, resolveActivePanel } from '~/Providers';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 
@@ -20,6 +20,8 @@ function PanelLoading() {
 export default function Nav({ links }: { links: NavLink[] }) {
   const { active } = useActivePanel();
   const effectiveActive = resolveActivePanel(active, links);
+  const contentPanel = effectiveActive === MEMORY_PANEL ? DEFAULT_PANEL : effectiveActive;
+  const Memory = effectiveActive === MEMORY_PANEL ? links.find((link) => link.id === MEMORY_PANEL)?.Component : null;
   return (
     <div
       className={cn(
@@ -31,9 +33,14 @@ export default function Nav({ links }: { links: NavLink[] }) {
     >
       <Suspense fallback={<PanelLoading />}>
         {links.map((link) =>
-          link.id === effectiveActive && link.Component ? <link.Component key={link.id} /> : null,
+          link.id === contentPanel && link.Component ? <link.Component key={link.id} /> : null,
         )}
       </Suspense>
+      {Memory && (
+        <Suspense fallback={null}>
+          <Memory />
+        </Suspense>
+      )}
     </div>
   );
 }

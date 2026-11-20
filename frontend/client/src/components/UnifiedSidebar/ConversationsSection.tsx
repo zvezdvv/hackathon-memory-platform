@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useMemo, memo, useRef } from 'react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useRecoilValue } from 'recoil';
 import type { InfiniteQueryObserverResult } from '@tanstack/react-query';
 import type { ConversationListResponse } from 'librechat-data-provider';
@@ -29,6 +29,7 @@ import ProjectsSection from '~/components/Conversations/ProjectsSection';
 import ChatFilterMenu from '~/components/Conversations/ChatFilterMenu';
 import PinnedSection from '~/components/Conversations/PinnedSection';
 import ProjectNamesProvider from '~/Providers/ProjectNamesContext';
+import { activePanelAtom, DEFAULT_PANEL, MEMORY_PANEL } from '~/Providers/ActivePanelContext';
 import useDrawerViewport from '~/hooks/Nav/useDrawerViewport';
 import useSidebarToggle from '~/hooks/Nav/useSidebarToggle';
 import { Conversations } from '~/components/Conversations';
@@ -42,6 +43,7 @@ const ConversationsSection = memo(() => {
   const localize = useLocalize();
   const isSmallScreen = useDrawerViewport();
   const { setSidebarOpen } = useSidebarToggle();
+  const setActivePanel = useSetAtom(activePanelAtom);
   const { isAuthenticated } = useAuthContext();
   const { data: startupConfig } = useGetStartupConfig();
   const interfaceConfig = startupConfig?.interface;
@@ -170,13 +172,14 @@ const ConversationsSection = memo(() => {
    */
   const toggleNav = useCallback(
     (afterSlide?: () => void) => {
+      setActivePanel((active) => active === MEMORY_PANEL ? DEFAULT_PANEL : active);
       if (isSmallScreen) {
         setSidebarOpen(false, afterSlide);
         return;
       }
       afterSlide?.();
     },
-    [isSmallScreen, setSidebarOpen],
+    [isSmallScreen, setSidebarOpen, setActivePanel],
   );
 
   const loadMoreConversations = useCallback(() => {

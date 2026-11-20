@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useMemo, ReactNode } from 'react'
 import { atom, useAtom } from 'jotai';
 
 export const DEFAULT_PANEL = 'conversations';
+export const MEMORY_PANEL = 'memories';
+export const MEMORY_PANE_ID = 'memory-pane';
 
 /**
  * Held in memory for the life of the document rather than in Web Storage, so every entry

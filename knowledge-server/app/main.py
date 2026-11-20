@@ -15,9 +15,12 @@ import markdown
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import BaseModel
 
 from .mcp_tools import mcp
-from .store import EDITABLE_EXT, JWT_SECRET, safe_path, split_frontmatter, store
+from .store import (
+    EDITABLE_EXT, JWT_SECRET, DocumentStatus, rel, safe_path, split_frontmatter, store, validate_upload,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -71,7 +74,7 @@ def status():
 
 
 @app.post("/api/reindex", dependencies=[Depends(require_user)])
-def reindex():
+async def reindex():
     return {"retrying": store.retry_unembedded()}
 
 
@@ -99,7 +102,7 @@ def text(path: str):
 
 
 @app.put("/api/file", dependencies=[Depends(require_user)])
-def put_file(payload: dict = Body(...)):
+async def put_file(payload: dict = Body(...)):
     path, content = payload.get("path", ""), payload.get("content", "")
     if Path(path).suffix.lower() not in EDITABLE_EXT:
         raise HTTPException(400, "Only Markdown/text files can be edited")
@@ -107,12 +110,33 @@ def put_file(payload: dict = Body(...)):
 
 
 @app.post("/api/upload", dependencies=[Depends(require_user)])
-async def upload(folder: str = Form("files"), files: list[UploadFile] = File(...)):
-    saved = []
+async def upload(
+    folder: str = Form("files"),
+    files: list[UploadFile] = File(...),
+    document_statuses: list[DocumentStatus] = Form(default=[]),
+):
+    if document_statuses and len(document_statuses) != len(files):
+        raise HTTPException(400, "Choose one status for each file")
+    uploads = []
     for f in files:
+        name = f.filename or "file"
         data = await f.read()
-        saved.append(_guard(lambda: store.save_upload(folder, f.filename or "file", data)))
+        _guard(lambda: validate_upload(name, data))
+        uploads.append((name, data))
+    statuses = document_statuses or ["active"] * len(uploads)
+    saved = _guard(lambda: [store.save_upload(folder, name, data, s) for (name, data), s in zip(uploads, statuses)])
     return {"saved": saved}
+
+
+class StatusChange(BaseModel):
+    path: str
+    document_status: DocumentStatus
+
+
+@app.patch("/api/document-status", dependencies=[Depends(require_user)])
+async def document_status(payload: StatusChange):
+    _guard(lambda: store.set_status(payload.path, payload.document_status))
+    return {"path": payload.path, "document_status": payload.document_status}
 
 
 @app.post("/api/folder", dependencies=[Depends(require_user)])
@@ -121,7 +145,7 @@ def folder(payload: dict = Body(...)):
 
 
 @app.delete("/api/item", dependencies=[Depends(require_user)])
-def delete_item(path: str):
+async def delete_item(path: str):
     _guard(lambda: store.delete(path))
     return {"deleted": path}
 
@@ -131,12 +155,19 @@ async def search(q: str, folder: str = "", k: int = Query(8, ge=1, le=20)):
     return await store.search(q, folder, k)
 
 
+class Note(BaseModel):
+    title: str = ""
+    text: str
+    person: str = ""
+    document_status: DocumentStatus = "active"
+
+
 @app.post("/api/note", dependencies=[Depends(require_user)])
-def note(payload: dict = Body(...)):
-    if not (payload.get("text") or "").strip():
+async def note(payload: Note):
+    if not payload.text.strip():
         raise HTTPException(400, "No text")
     path = _guard(
-        lambda: store.save_note(payload.get("title", ""), payload["text"], payload.get("person", ""))
+        lambda: store.save_note(payload.title, payload.text, payload.person, document_status=payload.document_status)
     )
     return {"path": path}
 
@@ -201,6 +232,7 @@ STATUS_LABEL = {
     "text_only": "🔎 keyword search only (not embedded)",
     "pending": "⏳ indexing",
     "error": "⚠️ error",
+    "excluded": "Excluded from search",
 }
 
 
@@ -214,8 +246,9 @@ def view(path: str, hl: str = "", embed: int = 0):
     p = _guard(lambda: safe_path(path))
     if not p.is_file():
         raise HTTPException(404, "File not found")
-    entry = store.entries.get(path, {})
-    status_txt = STATUS_LABEL.get(entry.get("status", "pending"), "")
+    entry = store.entries.get(rel(p), {})
+    status = store.index_status(rel(p), entry)
+    status_txt = STATUS_LABEL.get(status, "")
     ext = p.suffix.lower()
     text_content = store.get_text(path)
     meta, body = split_frontmatter(text_content) if ext in (".md", ".markdown") else ({}, text_content)

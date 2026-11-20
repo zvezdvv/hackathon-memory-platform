@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { DragEvent, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import {
   AlertTriangle,
   ArrowLeft,
@@ -32,7 +32,10 @@ import {
   X,
 } from 'lucide-react';
 import { getTokenHeader } from 'librechat-data-provider';
-import { DEFAULT_PANEL, useActivePanel } from '~/Providers';
+import OpenSidebar from '~/components/Chat/Menus/OpenSidebar';
+import useSidebarState from '~/hooks/Nav/useSidebarState';
+import { DEFAULT_PANEL, MEMORY_PANE_ID, useActivePanel } from '~/Providers';
+import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 
 /* ------------------------------------------------------------------ API */
@@ -46,6 +49,15 @@ const KB_URL =
     ? `${window.location.protocol}//${window.location.hostname}:8100`
     : `${window.location.origin}/knowledge`;
 const KB_ORIGIN = new URL(KB_URL).origin;
+const FILE_ACCEPT = '.pdf,.md,.markdown,.txt';
+const FILE_EXTENSION = /\.(pdf|md|markdown|txt)$/i;
+const DOCUMENT_STATUS = {
+  active: 'com_ui_memory_status_active',
+  inactive: 'com_ui_memory_status_inactive',
+  draft: 'com_ui_memory_status_draft',
+} as const;
+type DocumentStatus = keyof typeof DOCUMENT_STATUS;
+type PendingUpload = { file: File; status: DocumentStatus };
 
 type TreeNode = {
   name: string;
@@ -71,7 +83,8 @@ type Doc = {
   ext: string;
   size: number;
   mtime: number;
-  status: 'indexed' | 'text_only' | 'pending' | 'error';
+  status: 'indexed' | 'text_only' | 'pending' | 'error' | 'excluded';
+  document_status: DocumentStatus;
   id: string;
   title: string;
   typ: string;
@@ -125,6 +138,7 @@ const STATUS: Record<string, { cls: string; label: string }> = {
   text_only: { cls: 'bg-amber-400', label: 'Keyword search only (no embedding)' },
   pending: { cls: 'bg-blue-400 animate-pulse', label: 'Indexing …' },
   error: { cls: 'bg-red-500', label: 'Indexing failed' },
+  excluded: { cls: 'bg-border-heavy', label: 'Excluded from search' },
 };
 
 function countFiles(n?: TreeNode): { total: number; indexed: number; pending: number } {
@@ -163,6 +177,9 @@ function Modal({
   }, [onClose]);
   return createPortal(
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
       className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-2 sm:p-6"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
@@ -197,6 +214,36 @@ const btnCls =
   'inline-flex items-center justify-center gap-1.5 rounded-lg border border-border-medium bg-surface-secondary px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover disabled:opacity-50';
 const primaryCls =
   'inline-flex items-center justify-center gap-1.5 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50';
+
+function StatusSelect({
+  value,
+  onChange,
+  label,
+  disabled,
+}: {
+  value: DocumentStatus;
+  onChange: (status: DocumentStatus) => void;
+  label?: string;
+  disabled?: boolean;
+}) {
+  const localize = useLocalize();
+  return (
+    <label className="flex flex-col gap-1 text-xs font-medium text-text-secondary">
+      {!label && <span>{localize('com_ui_memory_document_status')}</span>}
+      <select
+        aria-label={label}
+        className={cn(inputCls, 'py-1.5')}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value as DocumentStatus)}
+      >
+        {Object.entries(DOCUMENT_STATUS).map(([status, key]) => (
+          <option key={status} value={status}>{localize(key)}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 /* ------------------------------------------------------------------ Viewer */
 
@@ -242,6 +289,7 @@ type SpeechRec = {
 function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (path: string) => void }) {
   const [title, setTitle] = useState('');
   const [person, setPerson] = useState('');
+  const [status, setStatus] = useState<DocumentStatus>('active');
   const [text, setText] = useState('');
   const [interim, setInterim] = useState('');
   const [recording, setRecording] = useState(false);
@@ -287,7 +335,7 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
     setSaving(true);
     setError('');
     try {
-      const res = await kb<{ path: string }>('/api/note', json('POST', { title, person, text }));
+      const res = await kb<{ path: string }>('/api/note', json('POST', { title, person, text, document_status: status }));
       onSaved(res.path);
     } catch (e) {
       setError(String((e as Error).message));
@@ -301,6 +349,7 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
       <div className="flex flex-col gap-3">
         <input className={inputCls} placeholder="Title, e.g. “Gritting plan Moritzberg”" value={title} onChange={(e) => setTitle(e.target.value)} />
         <input className={inputCls} placeholder="Person (optional)" value={person} onChange={(e) => setPerson(e.target.value)} />
+        <StatusSelect value={status} onChange={setStatus} disabled={saving} />
         <div className="flex items-center gap-2">
           {recording ? (
             <button type="button" className={cn(btnCls, 'border-red-500 text-red-500')} onClick={stop}>
@@ -345,6 +394,7 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
   const [person, setPerson] = useState('');
   const [topic, setTopic] = useState('');
   const [guide, setGuide] = useState('');
+  const [status, setStatus] = useState<DocumentStatus>('active');
 
   useEffect(() => {
     kb<Person[]>('/api/people').then(setPeople).catch(() => setPeople([]));
@@ -363,6 +413,7 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
       `Person: ${person.trim()}`,
       `Topic: ${topic.trim()}`,
       guide ? `Guide: ${guide}` : '',
+      `Document status: ${status}`,
     ]
       .filter(Boolean)
       .join('\n');
@@ -389,6 +440,7 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
           {guides.map((g) => <option key={g.path} value={g.path}>{g.title}</option>)}
           <option value="">Basic rules only</option>
         </select>
+        <StatusSelect value={status} onChange={setStatus} />
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className={btnCls} onClick={onClose}>Cancel</button>
           <button type="button" className={primaryCls} onClick={start} disabled={!person.trim() || !topic.trim()}>
@@ -492,6 +544,8 @@ function Chip({
 }
 
 export default function KnowledgePanel() {
+  const localize = useLocalize();
+  const { isSmallScreen, expanded } = useSidebarState();
   const { setActive } = useActivePanel();
   const onClose = useCallback(() => setActive(DEFAULT_PANEL), [setActive]);
   const [docs, setDocs] = useState<Doc[] | null>(null);
@@ -506,9 +560,12 @@ export default function KnowledgePanel() {
   const [hits, setHits] = useState<SearchHit[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<{ path: string; hl?: string } | null>(null);
-  const [dialog, setDialog] = useState<'speech' | 'interview' | null>(null);
+  const [dialog, setDialog] = useState<'upload' | 'speech' | 'interview' | null>(null);
+  const [uploads, setUploads] = useState<PendingUpload[]>([]);
+  const [uploadError, setUploadError] = useState('');
+  const [statusSaving, setStatusSaving] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [showFilters, setShowFilters] = useState(true);
+  const [showFilters, setShowFilters] = useState(!isSmallScreen);
   const fileInput = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -532,13 +589,13 @@ export default function KnowledgePanel() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || (isSmallScreen && expanded)) return;
       e.preventDefault();
       if (!dialog) onClose();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose, dialog]);
+  }, [onClose, dialog, isSmallScreen, expanded]);
 
   // The embedded viewer asks for the login token when saving
   useEffect(() => {
@@ -575,6 +632,7 @@ export default function KnowledgePanel() {
 
   const all = docs ?? [];
   const byPath = useMemo(() => new Map(all.map((d) => [d.path, d])), [all]);
+  const visibleHits = hits?.filter((hit) => (byPath.get(hit.path)?.document_status ?? 'active') === 'active');
 
   const folders = useMemo(() => {
     const set = new Map<string, number>();
@@ -625,21 +683,50 @@ export default function KnowledgePanel() {
   };
   const target = folder && !folder.startsWith('_guides') ? folder : 'files';
 
-  const upload = async (files: FileList | File[]) => {
-    const list = Array.from(files);
-    if (!list.length) return;
-    setBusy(`Uploading ${list.length} file(s) to ${target}/ …`);
+  const chooseFiles = (files: FileList) => {
+    const chosen = Array.from(files);
+    if (!chosen.length || busy) return;
+    if (chosen.some((file) => !FILE_EXTENSION.test(file.name))) {
+      setError(localize('com_ui_memory_file_types'));
+      return;
+    }
+    setError('');
+    setUploadError('');
+    setUploads(chosen.map((file) => ({ file, status: 'active' })));
+    setDialog('upload');
+  };
+
+  const upload = async () => {
+    setBusy(localize('com_ui_memory_uploading'));
+    setUploadError('');
     try {
       const fd = new FormData();
       fd.append('folder', target);
-      list.forEach((f) => fd.append('files', f));
+      uploads.forEach(({ file, status }) => {
+        fd.append('files', file);
+        fd.append('document_statuses', status);
+      });
       const res = await kb<{ saved: string[] }>('/api/upload', { method: 'POST', body: fd });
       await load();
+      setDialog(null);
+      setUploads([]);
       if (res.saved[0]) setSelected({ path: res.saved[0] });
     } catch (e) {
-      setError(`Upload failed: ${(e as Error).message}`);
+      setUploadError((e as Error).message);
     } finally {
       setBusy('');
+    }
+  };
+
+  const changeStatus = async (path: string, status: DocumentStatus) => {
+    setStatusSaving(true);
+    try {
+      await kb('/api/document-status', json('PATCH', { path, document_status: status }));
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setStatusSaving(false);
     }
   };
 
@@ -682,7 +769,7 @@ export default function KnowledgePanel() {
       onClick={() => setSelected({ path: d.path })}
       className={cn(
         'grid w-full grid-cols-[auto_1fr] gap-x-3 border-b border-border-light px-4 py-2.5 text-left hover:bg-surface-hover',
-        !compact && 'md:grid-cols-[auto_minmax(0,1fr)_8rem_10rem_6rem]',
+        !compact && 'md:grid-cols-[auto_minmax(0,1fr)_6rem_6rem_8rem_6rem]',
         selected?.path === d.path && 'bg-surface-active-alt',
       )}
     >
@@ -694,6 +781,7 @@ export default function KnowledgePanel() {
         </span>
         <span className={cn('mt-0.5 flex flex-wrap items-center gap-1 text-[11px] text-text-secondary', !compact && 'md:hidden')}>
           <span className={cn('rounded-full px-1.5', TYP_STYLE[d.typ] ?? TYP_STYLE.Document)}>{d.typ}</span>
+          <span>{localize(DOCUMENT_STATUS[d.document_status ?? 'active'])}</span>
           {d.person && <span>{d.person}</span>}
           <span>· {fmtDate(d.datum)}</span>
         </span>
@@ -717,6 +805,9 @@ export default function KnowledgePanel() {
       <span className={cn('hidden', !compact && 'md:block')}>
         <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-medium', TYP_STYLE[d.typ] ?? TYP_STYLE.Document)}>{d.typ}</span>
       </span>
+      <span className={cn('hidden truncate text-xs text-text-secondary', !compact && 'md:block')}>
+        {localize(DOCUMENT_STATUS[d.document_status ?? 'active'])}
+      </span>
       <span className={cn('hidden truncate text-xs text-text-secondary', !compact && 'md:block')} title={d.rolle}>{d.person || '–'}</span>
       <span className={cn('hidden text-xs', !compact && 'md:block', d.date_source === 'file' ? 'text-text-tertiary' : 'text-text-secondary')} title={d.date_source === 'file' ? 'File date (no date in the document)' : 'Date stated in the document'}>
         {fmtDate(d.datum)}
@@ -724,13 +815,16 @@ export default function KnowledgePanel() {
     </button>
   );
 
+  const pane = document.getElementById(MEMORY_PANE_ID);
+  if (!pane) return null;
+
   return createPortal(
     <div
-      role="dialog"
-      aria-modal="true"
+      role="region"
       aria-labelledby="memory-overlay-title"
-      className="fixed inset-0 z-[150] flex flex-col bg-surface-primary"
+      className="relative flex size-full flex-col bg-surface-primary"
       onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
         e.preventDefault();
         setDragging(true);
       }}
@@ -738,17 +832,18 @@ export default function KnowledgePanel() {
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
-        if (e.dataTransfer.files?.length) upload(e.dataTransfer.files);
+        if (e.dataTransfer.files.length) chooseFiles(e.dataTransfer.files);
       }}
     >
       {/* Kopfzeile */}
       <header className="flex flex-wrap items-center gap-3 border-b border-border-light px-4 py-2.5">
+        {isSmallScreen && <OpenSidebar testId="memory-open-sidebar" />}
         <button
           type="button"
           onClick={() => setShowFilters((v) => !v)}
           className={cn('rounded-md p-1.5 text-text-secondary hover:bg-surface-hover', showFilters && 'bg-surface-active-alt')}
-          title={showFilters ? 'Hide sidebar' : 'Show sidebar'}
-          aria-label={showFilters ? 'Hide sidebar' : 'Show sidebar'}
+          title={localize('com_ui_memory_toggle_filters')}
+          aria-label={localize('com_ui_memory_toggle_filters')}
           aria-pressed={showFilters}
         >
           <PanelLeft className="size-5" />
@@ -796,10 +891,11 @@ export default function KnowledgePanel() {
         <input
           ref={fileInput}
           type="file"
+          accept={FILE_ACCEPT}
           multiple
           className="hidden"
           onChange={(e) => {
-            if (e.target.files) upload(e.target.files);
+            if (e.target.files) chooseFiles(e.target.files);
             e.target.value = '';
           }}
         />
@@ -853,7 +949,7 @@ export default function KnowledgePanel() {
 
         {/* Liste */}
         <main className={cn('min-w-0 flex-col', selected ? 'hidden w-[22rem] flex-none md:flex' : 'flex flex-1')}>
-          {hits === null ? (
+          {!visibleHits ? (
             <>
               <div className="flex flex-wrap items-center gap-2 border-b border-border-light px-4 py-2 text-xs text-text-secondary">
                 <span className="mr-auto">
@@ -869,10 +965,11 @@ export default function KnowledgePanel() {
                   {GROUPS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                 </select>
               </div>
-              <div className={cn('hidden grid-cols-[auto_minmax(0,1fr)_8rem_10rem_6rem] gap-x-3 border-b border-border-light px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary', !compact && 'md:grid')}>
+              <div className={cn('hidden grid-cols-[auto_minmax(0,1fr)_6rem_6rem_8rem_6rem] gap-x-3 border-b border-border-light px-4 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-text-tertiary', !compact && 'md:grid')}>
                 <span className="w-2" />
                 <span>Title</span>
                 <span>Type</span>
+                <span>{localize('com_ui_memory_document_status')}</span>
                 <span>Person</span>
                 <span>Date</span>
               </div>
@@ -894,9 +991,9 @@ export default function KnowledgePanel() {
             </>
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-4">
-              <p className="mb-3 text-xs text-text-secondary">{searching ? 'Searching …' : `${hits.length} passages for “${query}”`}</p>
+              <p className="mb-3 text-xs text-text-secondary">{searching ? 'Searching …' : `${visibleHits.length} passages for “${query}”`}</p>
               <div className="flex flex-col gap-2">
-                {hits.map((h, i) => {
+                {visibleHits.map((h, i) => {
                   const d = byPath.get(h.path);
                   return (
                     <button
@@ -942,6 +1039,14 @@ export default function KnowledgePanel() {
                   {[sel?.typ, sel?.person && `${sel.person}${sel.rolle ? ` (${sel.rolle})` : ''}`, sel?.datum && fmtDate(sel.datum), sel?.ort].filter(Boolean).join(' · ')}
                 </div>
               </div>
+              {sel && (
+                <StatusSelect
+                  value={sel.document_status ?? 'active'}
+                  onChange={(status) => changeStatus(sel.path, status)}
+                  label={localize('com_ui_memory_document_status')}
+                  disabled={statusSaving}
+                />
+              )}
               <a href={viewSrc.replace('&embed=1', '')} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-text-secondary hover:bg-surface-hover" title="Open in new tab">
                 <Maximize2 className="size-4" />
               </a>
@@ -949,7 +1054,7 @@ export default function KnowledgePanel() {
                 <Trash2 className="size-4" />
               </button>
             </div>
-            <iframe key={viewSrc} title={selected.path} src={viewSrc} className="min-h-0 w-full flex-1 border-0 bg-surface-primary" />
+            <iframe key={`${viewSrc}:${sel?.status ?? ''}`} title={selected.path} src={viewSrc} className="min-h-0 w-full flex-1 border-0 bg-surface-primary" />
           </section>
         )}
       </div>
@@ -962,6 +1067,36 @@ export default function KnowledgePanel() {
         </div>
       )}
 
+      {dialog === 'upload' && (
+        <Modal title={localize('com_ui_upload_files')} onClose={() => !busy && setDialog(null)}>
+          <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); void upload(); }}>
+            <div className="grid grid-cols-[minmax(0,1fr)_8rem] gap-3 text-xs font-semibold text-text-secondary">
+              <span>{localize('com_ui_memory_file_name')}</span>
+              <span>{localize('com_ui_memory_document_status')}</span>
+            </div>
+            {uploads.map(({ file, status }, index) => (
+              <div key={`${file.name}-${index}`} className="grid grid-cols-[minmax(0,1fr)_8rem] items-center gap-3">
+                <span className="truncate text-sm" title={file.name}>{file.name}</span>
+                <StatusSelect
+                  value={status}
+                  label={`${localize('com_ui_memory_document_status')} · ${file.name}`}
+                  disabled={!!busy}
+                  onChange={(next) => setUploads((current) => current.map((item, i) => i === index ? { ...item, status: next } : item))}
+                />
+              </div>
+            ))}
+            {uploadError && <p role="alert" className="text-sm text-red-500">{uploadError}</p>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className={btnCls} disabled={!!busy} onClick={() => setDialog(null)}>
+                {localize('com_ui_cancel')}
+              </button>
+              <button type="submit" className={primaryCls} disabled={!!busy || uploads.length === 0}>
+                {busy ? localize('com_ui_memory_uploading') : localize('com_ui_upload')}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
       {dialog === 'speech' && (
         <SpeechDialog
           onClose={() => setDialog(null)}
@@ -974,6 +1109,6 @@ export default function KnowledgePanel() {
       )}
       {dialog === 'interview' && <InterviewDialog onClose={() => setDialog(null)} />}
     </div>,
-    document.body,
+    pane,
   );
 }
