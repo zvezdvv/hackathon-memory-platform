@@ -1,7 +1,8 @@
 """Map data: places named in document metadata, with coordinates and one short hint per place.
 
-Coordinates come from places.json (checked-in demo seed). Unknown names are looked up once via
-OpenStreetMap Nominatim and cached in .state/geocode.json. Hints ("what to watch out for here")
+Coordinates come from places.json or exact OpenStreetMap Nominatim matches cached in
+.state/geocode.json. Only places listed in active knowledge documents can become pins.
+Hints ("what to watch out for here")
 are extracted per document by the LLM and cached by content hash, so only new or changed
 documents cost a call. Without an LLM the document title is used as the hint.
 """
@@ -94,7 +95,7 @@ class Places:
                 return None
             return {"key": key, "name": s["name"], "lat": s["lat"], "lon": s["lon"]}
         g = self.geo.get(key)
-        if g and "lat" in g:
+        if g and g.get("verified") is True and "lat" in g:
             return {"key": key, "name": g.get("name") or name, "lat": g["lat"], "lon": g["lon"]}
         return None
 
@@ -126,13 +127,24 @@ class Places:
                             params={"q": f"{name}, {CITY}", "format": "jsonv2", "limit": 1,
                                     "viewbox": VIEWBOX, "bounded": 1},
                         )
-                        hit = r.json()[0] if r.status_code < 300 and r.json() else None
-                    except (httpx.HTTPError, ValueError, IndexError):
-                        hit = None
-                    self.geo[key] = (
-                        {"name": name, "lat": float(hit["lat"]), "lon": float(hit["lon"])}
-                        if hit else {"miss": time.time()}
-                    )
+                        hits = r.json() if r.is_success else []
+                        hit = next(
+                            (
+                                item for item in hits
+                                if isinstance(item, dict)
+                                and isinstance(item.get("name"), str)
+                                and slugify(item["name"]) == key
+                                and item.get("category") not in {"waterway", "boundary"}
+                            ),
+                            None,
+                        )
+                        position = (
+                            {"name": name, "lat": float(hit["lat"]), "lon": float(hit["lon"]), "verified": True}
+                            if hit else {"miss": time.time()}
+                        )
+                    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                        position = {"miss": time.time()}
+                    self.geo[key] = position
             _store_json(GEO_CACHE, self.geo)
 
     # ---- hints
@@ -175,6 +187,8 @@ class Places:
     # ---- public
     def mappable(self, path: str) -> list[str]:
         """Place names of a document that have a pin (used to tell the chat model which names to map)."""
+        if not store.is_active(path):
+            return []
         meta, _ = split_frontmatter(store.get_text(path))
         raw = meta.get("ort") or str(meta.get("places", "")).strip("[]")
         out = []
@@ -206,6 +220,8 @@ class Places:
         places: dict[str, dict] = {}
         unlocated: set[str] = set()
         for d, doc_names, fp in prepared:
+            if not store.is_active(d["path"]):
+                continue
             hints = self._cached_hints(d["path"], fp) or {}
             for name in doc_names:
                 loc = self.resolve(name)

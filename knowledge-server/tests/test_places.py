@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
+
 storage = importlib.import_module("app.store")
 mapping = importlib.import_module("app.places")
 
@@ -71,12 +73,27 @@ class MapPlacesTests(unittest.TestCase):
     def test_names_filter_and_mappable_names_use_the_pin_name(self):
         path = self._file(
             "speech/2026-11-21_bruecke.md",
-            '---\ntype: voice note\ntitle: "Brücke"\nplaces: ["Kennedydamm", "Innerste-Brücke"]\n---\nText',
+            '---\ntype: voice note\ntitle: "Brücke"\n'
+            'places: ["Kennedydamm", "Innerste", "Innerste-Brücke", "St. Bernward", "St. Bernward Krankenhaus"]\n'
+            '---\nText',
         )
-        self.assertEqual(self.places.mappable(path), ["Kennedydamm", "Innerste-Brücken"])
+        self.assertEqual(self.places.mappable(path), ["Kennedydamm", "St. Bernward Krankenhaus"])
         with patch.object(self.places, "geocode_missing", return_value=None):
-            data = asyncio.run(self.places.payload("Innerste-Brücken"))
-        self.assertEqual([p["key"] for p in data["places"]], ["innerste-bruecken"])
+            data = asyncio.run(self.places.payload("St. Bernward Krankenhaus"))
+        self.assertEqual([p["key"] for p in data["places"]], ["st-bernward"])
+        self.assertEqual(len(data["places"][0]["hints"]), 1)
+
+    def test_fuzzy_geocoder_result_and_legacy_cache_do_not_create_pins(self):
+        self._file("files/sample.md", '---\nort: "Treustraße"\n---\n# Sample')
+        self.places.geo["treustrasse"] = {"name": "Treustraße", "lat": 52.15, "lon": 9.95}
+        self.assertIsNone(self.places.resolve("Treustraße"))
+        client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(
+            200, json=[{"name": "Treibestraße", "category": "highway", "lat": "52.15", "lon": "9.95"}],
+        )))
+        with patch.object(mapping.httpx, "AsyncClient", return_value=client):
+            result = asyncio.run(self.places.payload())
+        self.assertEqual(result["places"], [])
+        self.assertEqual(result["unlocated"], ["Treustraße"])
 
 
 if __name__ == "__main__":
