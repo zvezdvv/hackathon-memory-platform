@@ -122,7 +122,7 @@ const FOLDER_LABEL: Record<string, string> = {
   files: 'Files',
   speech: 'Voice notes',
   interviews: 'Interviews',
-  _guides: 'Interview guides',
+  _guides: 'Guidelines',
 };
 
 const STATUS: Record<string, { cls: string; label: string }> = {
