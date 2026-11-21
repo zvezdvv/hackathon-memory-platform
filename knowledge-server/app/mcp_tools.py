@@ -3,6 +3,8 @@
 
 from mcp.server.fastmcp import FastMCP
 
+from .places import places
+
 from .store import DocumentStatus, GUIDE_FOLDER, rel, safe_path, slugify, split_frontmatter, store, view_url
 
 SEARCH_CANDIDATES = 12
@@ -51,12 +53,17 @@ def _fmt_hits(res: dict) -> str:
                 f"[{u['path']}]({view_url(u['path'])}) (as of {u['datum']}). "
                 "If they conflict, the newer version applies – point this out explicitly."
             )
+        mapped = places.mappable(h["path"])
+        if mapped:
+            lines.append(f"Map places: {'; '.join(mapped)}")
         snippet = h["snippet"].replace("\n", "\n> ")
         lines.append(f"> {snippet}\n")
     lines.append(
         "Cite every result you use inline, right after the statement, as a short Markdown link, "
         "e.g. ([N01](URL)). Copy the URL completely and unchanged (including &hl=…) – it jumps "
-        "to the highlighted passage."
+        "to the highlighted passage. Only if the user asks about a specific place, street, route or "
+        "\"where\": end with a map block naming just those places from \"Map places\" "
+        "(```map, the names separated by \"; \", ```). No map for general questions."
     )
     return "\n".join(lines)
 

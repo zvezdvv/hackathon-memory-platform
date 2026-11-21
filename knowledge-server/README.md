@@ -63,6 +63,22 @@ sub-folders. Topic, person (and session number for interviews) are metadata and 
 filtered in the Memory overlay. Folders can be
 deleted in the Memory overlay; there are no deeper sub-menus.
 
+## Map
+
+`GET /api/places` returns one pin per place named in the metadata of active documents (`ort` in
+notes, `places` in interviews and voice notes), each with a short hint per source document
+("what to watch out for here") and a category (ice & hazards, traffic & parking, priority, info).
+
+- Coordinates: `app/places.json` holds the demo places (looked up once via OpenStreetMap,
+  aliases for other spellings, `skip` for places without a reliable position). Unknown names
+  are looked up via Nominatim (max. 1 request/second) and cached in `.state/geocode.json`.
+- Hints: one LLM call per document, cached by content hash in `.state/place-hints.json`;
+  without an LLM the document title is used. Hints of documents updated by a newer one are
+  marked as possibly outdated.
+- `?names=A; B` returns only those places (used by the map preview in chat answers).
+  Search results list a document's mappable names as `Map places: …`, and the assistant ends
+  place-related answers with a ```` ```map ```` block that the chat renders as a map.
+
 ## MCP tools
 
 `search_knowledge`, `read_file`, `list_folder`, `list_interview_guides`, `person_overview`,

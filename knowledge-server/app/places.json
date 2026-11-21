@@ -1,0 +1,31 @@
+{
+  "_comment": "Demo coordinates for places named in the knowledge base (looked up once via OpenStreetMap). Keys are slugified names; aliases map other spellings to the same pin. Unknown names are geocoded at runtime and cached in .state/geocode.json.",
+  "steingrube": { "name": "Steingrube", "lat": 52.15293, "lon": 9.96062 },
+  "almsstrasse": { "name": "Almsstraße", "lat": 52.15441, "lon": 9.95134 },
+  "hoher-weg": { "name": "Hoher Weg", "lat": 52.15177, "lon": 9.95078 },
+  "treibestrasse": { "name": "Treibestraße", "lat": 52.14777, "lon": 9.94727 },
+  "senator-braun-allee": { "name": "Senator-Braun-Allee", "lat": 52.15472, "lon": 9.97257 },
+  "bergstrasse-moritzberg": {
+    "name": "Bergstraße (Moritzberg)",
+    "lat": 52.148,
+    "lon": 9.9271,
+    "aliases": ["bergstrasse"]
+  },
+  "marienburger-hoehe": { "name": "Marienburger Höhe", "lat": 52.13345, "lon": 9.97174 },
+  "marktplatz": {
+    "name": "Marktplatz",
+    "lat": 52.15267,
+    "lon": 9.95174,
+    "aliases": ["historischer-marktplatz", "weihnachtsmarkt"]
+  },
+  "kennedydamm": { "name": "Kennedydamm", "lat": 52.15337, "lon": 9.95709 },
+  "innerste-bruecken": {
+    "name": "Innerste-Brücken",
+    "lat": 52.14919,
+    "lon": 9.93931,
+    "aliases": ["innerste-bruecke", "innerstebruecke", "innerstebruecken"]
+  },
+  "hohnsensee": { "name": "Hohnsensee", "lat": 52.13796, "lon": 9.95129 },
+  "goschenstrasse": { "name": "Goschenstraße", "lat": 52.14702, "lon": 9.9559 },
+  "bauhof": { "name": "Bauhof", "skip": true, "_why": "No address in the sources; a geocoder would pick a wrong depot" }
+}

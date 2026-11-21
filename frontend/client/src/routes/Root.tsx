@@ -24,7 +24,7 @@ import {
   FileMapContext,
   MCPAppsPolicyProvider,
   activePanelAtom,
-  MEMORY_PANEL,
+  isOverlayPanel,
   MEMORY_PANE_ID,
 } from '~/Providers';
 import {
@@ -104,7 +104,7 @@ function RootLayout() {
    *  swipe. Opting in narrows it and gives the strip a dismiss target. */
   const drawerStrip = useRecoilValue(store.mobileDrawerStrip);
   const newChatSwitchToHistory = useRecoilValue(store.newChatSwitchToHistory);
-  const memoryOpen = useAtomValue(activePanelAtom) === MEMORY_PANEL;
+  const memoryOpen = isOverlayPanel(useAtomValue(activePanelAtom));
   const paneRef = useRef<HTMLDivElement>(null);
   /** Keyed off the committed state rather than the scrim's own click, because
    *  the header button, Escape, conversation selection and the bottom bar all

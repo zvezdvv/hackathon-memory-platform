@@ -49,6 +49,10 @@ Memory accepts PDF (up to 10 pages), Markdown and TXT. Active documents are inde
 
 The `knowledge` service also exposes an MCP server that LibreChat uses internally (`http://knowledge:8100/mcp/`, blocked at the proxy). Two assistants in the model selector use it: **Smart City Assistant** (answers with inline source links) and **Knowledge Interview** (asks targeted questions and saves the protocol). Uploads, edits and deletions require a LibreChat login.
 
+For live demos, tick **Showcase** in the interview dialog: the assistant asks only two questions about one critical place (`knowledge/_guides/05_showcase.md`), saves the protocol right away without a session number, and the place appears on the map.
+
+The **Map** tab shows every place named in the knowledge base on an OpenStreetMap map, with a short hint per source on what to watch out for there. Answers in the chat that concern places end with an interactive map preview, and **Show on map** in the Memory reading pane jumps to a document's places.
+
 ```sh
 docker compose up -d --build knowledge   # after changes to knowledge-server/
 docker compose up -d --build frontend    # after changes to the Memory tab

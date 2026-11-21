@@ -5,7 +5,7 @@ import { DropdownPopup, buttonVariants } from '@librechat/client';
 import type { NavLink } from '~/common';
 import type * as t from '~/common';
 import { useLocation } from 'react-router-dom';
-import { DEFAULT_PANEL, MEMORY_PANEL, useActivePanel, resolveActivePanel } from '~/Providers';
+import { DEFAULT_PANEL, isOverlayPanel, useActivePanel, resolveActivePanel } from '~/Providers';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 
@@ -56,7 +56,7 @@ function Switcher({
             return;
           }
           setActive(link.id);
-          if (link.id === MEMORY_PANEL) {
+          if (isOverlayPanel(link.id)) {
             onNavigate?.();
           }
           if (routeActiveId) {

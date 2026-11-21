@@ -2,7 +2,7 @@ import { Suspense } from 'react';
 import { Spinner } from '@librechat/client';
 import { EModelEndpoint } from 'librechat-data-provider';
 import type { NavLink } from '~/common';
-import { DEFAULT_PANEL, MEMORY_PANEL, useActivePanel, resolveActivePanel } from '~/Providers';
+import { DEFAULT_PANEL, isOverlayPanel, useActivePanel, resolveActivePanel } from '~/Providers';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 
@@ -20,8 +20,9 @@ function PanelLoading() {
 export default function Nav({ links }: { links: NavLink[] }) {
   const { active } = useActivePanel();
   const effectiveActive = resolveActivePanel(active, links);
-  const contentPanel = effectiveActive === MEMORY_PANEL ? DEFAULT_PANEL : effectiveActive;
-  const Memory = effectiveActive === MEMORY_PANEL ? links.find((link) => link.id === MEMORY_PANEL)?.Component : null;
+  const overlay = isOverlayPanel(effectiveActive);
+  const contentPanel = overlay ? DEFAULT_PANEL : effectiveActive;
+  const Memory = overlay ? links.find((link) => link.id === effectiveActive)?.Component : null;
   return (
     <div
       className={cn(

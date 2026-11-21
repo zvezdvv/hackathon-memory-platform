@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useRef, useEffect } from 'react';
+import React, { memo, useMemo, useRef, useEffect, Suspense } from 'react';
 import { strongDirection } from '@librechat/chat';
 import { PermissionTypes, Permissions, apiBaseUrl } from 'librechat-data-provider';
 import type { Element, ElementContent } from 'hast';
@@ -13,6 +13,7 @@ import { useMessagePartsHost } from '~/Providers/MessagePartsHostContext';
 import { useCodeBlockContext, useMediaContext } from '~/Providers';
 import CodeBlock from '~/components/Messages/Content/CodeBlock';
 import useHasAccess from '~/hooks/Roles/useHasAccess';
+import { lazyWithRecovery } from '~/lib/assets/lazy';
 import { useFileDownload } from '~/data-provider';
 import { useLocalize } from '~/hooks';
 
@@ -32,6 +33,18 @@ const isSingleLineCode = (children: React.ReactNode): boolean => {
   return false;
 };
 
+/** Smart City: ```map blocks (place names) render as an interactive map; Leaflet loads on demand. */
+const ChatMap = lazyWithRecovery(() => import('~/components/Map/ChatMap'));
+
+function MapBlock({ children }: { children: React.ReactNode }) {
+  const content = typeof children === 'string' ? children : String(children ?? '');
+  return (
+    <Suspense fallback={null}>
+      <ChatMap content={content} />
+    </Suspense>
+  );
+}
+
 export const code: React.ElementType = memo(function MarkdownCode({
   className,
   children,
@@ -47,7 +60,7 @@ export const code: React.ElementType = memo(function MarkdownCode({
   const isSingleLine = isSingleLineCode(children);
 
   const { getNextIndex, getNextMermaidIndex, resetCounter } = useCodeBlockContext();
-  const blockIndex = useRef(getNextIndex(isMath || isMermaid || isSingleLine)).current;
+  const blockIndex = useRef(getNextIndex(isMath || isMermaid || isSingleLine || lang === 'map')).current;
   /* Mermaid fences do not consume a code-block index, so every one of them in a
    * message would otherwise share `blockIndex` and collapse onto a single
    * artifact id. They carry their own sequence instead. */
@@ -59,6 +72,8 @@ export const code: React.ElementType = memo(function MarkdownCode({
 
   if (isMath) {
     return <>{children}</>;
+  } else if (lang === 'map') {
+    return <MapBlock>{children}</MapBlock>;
   } else if (isMermaid) {
     const content = typeof children === 'string' ? children : String(children);
     return (
@@ -94,6 +109,8 @@ export const codeNoExecution: React.ElementType = memo(function MarkdownCodeNoEx
 
   if (lang === 'math') {
     return children;
+  } else if (lang === 'map') {
+    return <MapBlock>{children}</MapBlock>;
   } else if (lang === 'mermaid') {
     const content = typeof children === 'string' ? children : String(children);
     return <Mermaid>{content}</Mermaid>;

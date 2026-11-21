@@ -3,6 +3,7 @@ import { MCPIcon, OpenAIMinimalIcon } from '@librechat/client';
 import {
   Bot,
   Brain,
+  Map as MapIcon,
   Bookmark,
   NotebookPen,
   ScrollText,
@@ -47,6 +48,7 @@ const SchedulePanel = lazyWithRecovery(
 const Parameters = lazyWithRecovery(() => import('~/components/SidePanel/Parameters/Panel'));
 // Smart City: Memory-Tab = Wissens-Dateisystem (ersetzt das eingebaute Memories-Panel)
 const MemoryPanel = lazyWithRecovery(() => import('~/components/SidePanel/Knowledge/KnowledgePanel'));
+const MapPanel = lazyWithRecovery(() => import('~/components/Map/MapPanel'));
 
 export default function useSideNavLinks({
   hidePanel,
@@ -194,6 +196,13 @@ export default function useSideNavLinks({
         icon: Brain,
         id: 'memories',
         Component: MemoryPanel,
+      });
+      links.push({
+        title: 'com_ui_map',
+        label: '',
+        icon: MapIcon,
+        id: 'map',
+        Component: MapPanel,
       });
     }
 

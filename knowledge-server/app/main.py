@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import html
 import re
@@ -19,6 +20,7 @@ from pydantic import BaseModel
 
 from . import ai
 from .mcp_tools import mcp
+from .places import places
 from .store import (
     AUDIO_DIR, EDITABLE_EXT, JWT_SECRET, DocumentStatus, rel, safe_path, split_frontmatter, store,
 )
@@ -31,8 +33,10 @@ mcp_app = mcp.streamable_http_app()  # erzeugt auch mcp.session_manager
 @contextlib.asynccontextmanager
 async def lifespan(_app: FastAPI):
     store.start()
+    warm = asyncio.create_task(places.warm())
     async with mcp.session_manager.run():
         yield
+    warm.cancel()
     await store.stop()
 
 
@@ -263,6 +267,15 @@ def people():
 @app.get("/api/guides")
 def guides():
     return store.guides()
+
+
+@app.get("/api/places")
+async def map_places(names: str = ""):
+    """Pins for the map: places from document metadata with coordinates and short hints.
+
+    names: optional "A; B" filter (used by the map preview in chat answers).
+    """
+    return await places.payload(names)
 
 
 # --------------------------------------------------------------------------- Viewer

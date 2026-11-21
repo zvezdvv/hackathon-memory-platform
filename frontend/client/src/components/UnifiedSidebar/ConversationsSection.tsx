@@ -29,7 +29,7 @@ import ProjectsSection from '~/components/Conversations/ProjectsSection';
 import ChatFilterMenu from '~/components/Conversations/ChatFilterMenu';
 import PinnedSection from '~/components/Conversations/PinnedSection';
 import ProjectNamesProvider from '~/Providers/ProjectNamesContext';
-import { activePanelAtom, DEFAULT_PANEL, MEMORY_PANEL } from '~/Providers/ActivePanelContext';
+import { activePanelAtom, DEFAULT_PANEL, isOverlayPanel } from '~/Providers/ActivePanelContext';
 import useDrawerViewport from '~/hooks/Nav/useDrawerViewport';
 import useSidebarToggle from '~/hooks/Nav/useSidebarToggle';
 import { Conversations } from '~/components/Conversations';
@@ -172,7 +172,7 @@ const ConversationsSection = memo(() => {
    */
   const toggleNav = useCallback(
     (afterSlide?: () => void) => {
-      setActivePanel((active) => active === MEMORY_PANEL ? DEFAULT_PANEL : active);
+      setActivePanel((active) => (isOverlayPanel(active) ? DEFAULT_PANEL : active));
       if (isSmallScreen) {
         setSidebarOpen(false, afterSlide);
         return;

@@ -5,7 +5,7 @@ import { Skeleton, Sidebar, Button, TooltipAnchor } from '@librechat/client';
 import type { MouseEventHandler } from 'react';
 import type { NavLink } from '~/common';
 import { useShortcutAriaKey, useShortcutHint } from '~/hooks/useKeyboardShortcuts';
-import { DEFAULT_PANEL, MEMORY_PANEL, useActivePanel, resolveActivePanel } from '~/Providers';
+import { DEFAULT_PANEL, isOverlayPanel, useActivePanel, resolveActivePanel } from '~/Providers';
 import AgentMarketplaceButton from '~/components/Nav/AgentMarketplaceButton';
 import { CLOSE_SIDEBAR_ID } from '~/components/Chat/Menus/OpenSidebar';
 import useDirection, { inlineSide } from '~/hooks/Nav/useDirection';
@@ -76,8 +76,8 @@ const NavIconButton = memo(function NavIconButton({
         onNavigate?.();
         return;
       }
-      if (link.id === MEMORY_PANEL) {
-        setActive(isActive ? DEFAULT_PANEL : MEMORY_PANEL);
+      if (isOverlayPanel(link.id)) {
+        setActive(isActive ? DEFAULT_PANEL : link.id);
         onLeaveInsights?.();
         return;
       }
@@ -156,7 +156,7 @@ function ExpandedPanel({
 
   const toggleLabel = expanded ? 'com_nav_close_sidebar' : 'com_nav_open_sidebar';
   const toggleClick = () => {
-    if (effectiveActive === MEMORY_PANEL) {
+    if (isOverlayPanel(effectiveActive)) {
       setActive(DEFAULT_PANEL);
     }
     (expanded ? onCollapse : onExpand)?.();

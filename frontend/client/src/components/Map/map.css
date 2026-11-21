@@ -1,0 +1,65 @@
+/* Smart City map pins. Leaflet draws into its own DOM, so pins are plain CSS rather than
+ * Tailwind classes; colors come from the category (see CATEGORIES in places.ts). */
+.kmap {
+  isolation: isolate;
+}
+.kmap.leaflet-container {
+  font: inherit;
+  background: rgb(var(--surface-secondary, 240 240 240));
+}
+/* OpenStreetMap only offers light tiles: invert them in dark mode, keep pins untouched. */
+.dark .kmap .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9);
+}
+.kmap-pin {
+  position: relative;
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.35);
+  transition: transform 150ms ease;
+}
+.kmap-pin::after {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border-radius: 50%;
+  background: #fff;
+}
+.kmap-pin.is-selected {
+  transform: rotate(-45deg) scale(1.35);
+}
+.kmap-pin.is-new::before {
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  animation: kmap-pulse 1.6s ease-out infinite;
+}
+@keyframes kmap-pulse {
+  from {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.4);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kmap-pin.is-new::before {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+.kmap a {
+  text-decoration: none;
+}
+.kmap .leaflet-tooltip {
+  font-size: 12px;
+  font-weight: 600;
+}

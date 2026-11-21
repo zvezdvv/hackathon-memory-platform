@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
+import { useSetAtom } from 'jotai';
 import { QueryKeys, getTokenHeader } from 'librechat-data-provider';
 import {
   AlertTriangle,
@@ -20,6 +21,7 @@ import {
   FolderOpen,
   FolderPlus,
   History,
+  MapPin,
   Loader2,
   Maximize2,
   PanelLeft,
@@ -32,23 +34,16 @@ import {
   X,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { DEFAULT_PANEL, MEMORY_PANE_ID, useActivePanel } from '~/Providers';
+import { DEFAULT_PANEL, MAP_PANEL, MEMORY_PANE_ID, useActivePanel } from '~/Providers';
 import OpenSidebar from '~/components/Chat/Menus/OpenSidebar';
 import useSidebarState from '~/hooks/Nav/useSidebarState';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
+import { KB_URL, KB_ORIGIN } from './kb';
+import { mapFocusAtom } from '~/components/Map/places';
 
 /* ------------------------------------------------------------------ API */
 
-/**
- * Behind the HTTPS proxy (Caddy) the knowledge server lives under /knowledge on the same domain.
- * Locally without the proxy (LibreChat directly on :3080) it is reached on port 8100.
- */
-const KB_URL =
-  window.location.port === '3080'
-    ? `${window.location.protocol}//${window.location.hostname}:8100`
-    : `${window.location.origin}/knowledge`;
-const KB_ORIGIN = new URL(KB_URL).origin;
 const FILE_ACCEPT = '.pdf,.md,.markdown,.txt';
 const FILE_EXTENSION = /\.(pdf|md|markdown|txt)$/i;
 const DOCUMENT_STATUS = {
@@ -488,6 +483,7 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
   const [person, setPerson] = useState('');
   const [topic, setTopic] = useState('');
   const [status, setStatus] = useState<DocumentStatus>('active');
+  const [showcase, setShowcase] = useState(false);
 
   useEffect(() => {
     kb<Person[]>('/api/people').then(setPeople).catch(() => setPeople([]));
@@ -499,6 +495,7 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
       `Person: ${person.trim()}`,
       `Topic: ${topic.trim()}`,
       `Document status: ${status}`,
+      showcase ? 'Mode: showcase' : '',
     ]
       .filter(Boolean)
       .join('\n');
@@ -521,6 +518,15 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
         <label className="text-xs font-medium text-text-secondary">Topic</label>
         <input className={inputCls} placeholder="e.g. Black ice operations at night" value={topic} onChange={(e) => setTopic(e.target.value)} />
         <StatusSelect value={status} onChange={setStatus} />
+        <label className="flex items-start gap-2 rounded-lg border border-border-light p-2.5 text-sm text-text-primary">
+          <input type="checkbox" className="mt-0.5" checked={showcase} onChange={(e) => setShowcase(e.target.checked)} />
+          <span>
+            Showcase
+            <span className="block text-xs text-text-secondary">
+              Live demo: two questions about one critical place, saved straight away and shown on the map. Not counted as a session.
+            </span>
+          </span>
+        </label>
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className={btnCls} onClick={onClose}>Cancel</button>
           <button type="button" className={primaryCls} onClick={start} disabled={!person.trim() || !topic.trim()}>
@@ -643,6 +649,7 @@ export default function KnowledgePanel() {
   const { isSmallScreen, expanded } = useSidebarState();
   const { setActive } = useActivePanel();
   const onClose = useCallback(() => setActive(DEFAULT_PANEL), [setActive]);
+  const setMapFocus = useSetAtom(mapFocusAtom);
   const [docs, setDocs] = useState<Doc[] | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
@@ -1187,6 +1194,19 @@ export default function KnowledgePanel() {
                   label={localize('com_ui_memory_document_status')}
                   disabled={statusSaving}
                 />
+              )}
+              {sel?.ort && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMapFocus(sel.ort ?? '');
+                    setActive(MAP_PANEL);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-text-secondary hover:bg-surface-hover hover:text-text-primary"
+                  title={`Show ${sel.ort} on the map`}
+                >
+                  <MapPin className="size-3.5" /> Show on map
+                </button>
               )}
               <a href={viewSrc.replace('&embed=1', '')} target="_blank" rel="noreferrer" className="rounded-md p-1.5 text-text-secondary hover:bg-surface-hover" title="Open in new tab">
                 <Maximize2 className="size-4" />

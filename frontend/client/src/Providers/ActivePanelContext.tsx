@@ -4,6 +4,10 @@ import { atom, useAtom } from 'jotai';
 export const DEFAULT_PANEL = 'conversations';
 export const MEMORY_PANEL = 'memories';
 export const MEMORY_PANE_ID = 'memory-pane';
+export const MAP_PANEL = 'map';
+/** Panels that open full-screen over the chat (in MEMORY_PANE_ID) instead of in the sidebar. */
+export const OVERLAY_PANELS: ReadonlySet<string> = new Set([MEMORY_PANEL, MAP_PANEL]);
+export const isOverlayPanel = (id: string) => OVERLAY_PANELS.has(id);
 
 /**
  * Held in memory for the life of the document rather than in Web Storage, so every entry

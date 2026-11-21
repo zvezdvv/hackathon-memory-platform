@@ -2560,6 +2560,7 @@
   "com_ui_memory_upload_constraints": "PDF up to 10 pages, Markdown or TXT.",
   "com_ui_memory_upload_folder": "Upload to folder",
   "com_ui_memory_uploading": "Uploading…",
+  "com_ui_map": "Map",
   "com_ui_memories": "Memory",
   "com_ui_memories_all": "All memories",
   "com_ui_memories_allow_create": "Allow creating Memories",

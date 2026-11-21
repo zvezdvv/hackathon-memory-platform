@@ -164,3 +164,31 @@ async def structure(transcript: str, title_hint: str = "", person_hint: str = ""
         return StructuredNote.model_validate(json.loads(content)).model_dump()
     except (ValueError, IndexError, KeyError, AttributeError, TypeError):
         raise RuntimeError("Note structuring returned an invalid result") from None
+
+
+async def json_completion(system: str, user: str, timeout: float = 90) -> dict:
+    """One JSON-mode chat completion; raises RuntimeError on any failure."""
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(
+                f"{OPENROUTER_URL}/chat/completions",
+                headers=_headers(),
+                json={
+                    "model": STRUCTURE_MODEL,
+                    "response_format": {"type": "json_object"},
+                    "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                },
+            )
+    except httpx.RequestError:
+        raise RuntimeError("LLM service was unavailable") from None
+    if r.status_code >= 300:
+        raise RuntimeError(f"LLM call failed (HTTP {r.status_code})")
+    try:
+        content = r.json()["choices"][0]["message"]["content"].strip()
+        content = content.removeprefix("```json").removeprefix("```").removesuffix("```")
+        data = json.loads(content)
+    except (ValueError, IndexError, KeyError, AttributeError, TypeError):
+        raise RuntimeError("LLM returned an invalid result") from None
+    if not isinstance(data, dict):
+        raise RuntimeError("LLM returned an invalid result")
+    return data
