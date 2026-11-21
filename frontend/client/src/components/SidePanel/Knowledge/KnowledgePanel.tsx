@@ -478,12 +478,10 @@ function SpeechDialog({ onClose, onSaved }: { onClose: () => void; onSaved: (pat
 /* ------------------------------------------------------------------ Interview */
 
 function InterviewDialog({ onClose }: { onClose: () => void }) {
-  const localize = useLocalize();
   const [people, setPeople] = useState<Person[]>([]);
   const [person, setPerson] = useState('');
   const [topic, setTopic] = useState('');
   const [status, setStatus] = useState<DocumentStatus>('active');
-  const [showcase, setShowcase] = useState(false);
 
   useEffect(() => {
     kb<Person[]>('/api/people').then(setPeople).catch(() => setPeople([]));
@@ -495,10 +493,7 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
       `Person: ${person.trim()}`,
       `Topic: ${topic.trim()}`,
       `Document status: ${status}`,
-      showcase ? 'Mode: showcase' : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    ].join('\n');
     window.location.assign(
       `/c/new?spec=wissens-interview&prompt=${encodeURIComponent(prompt)}&submit=true`,
     );
@@ -518,15 +513,6 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
         <label className="text-xs font-medium text-text-secondary">Topic</label>
         <input className={inputCls} placeholder="e.g. Black ice operations at night" value={topic} onChange={(e) => setTopic(e.target.value)} />
         <StatusSelect value={status} onChange={setStatus} />
-        <label className="flex items-start gap-2 rounded-lg border border-border-light p-2.5 text-sm text-text-primary">
-          <input type="checkbox" className="mt-0.5" checked={showcase} onChange={(e) => setShowcase(e.target.checked)} />
-          <span>
-            Showcase
-            <span className="block text-xs text-text-secondary">
-              Live demo: two questions about one critical place, saved straight away and shown on the map. Not counted as a session.
-            </span>
-          </span>
-        </label>
         <div className="flex justify-end gap-2 pt-1">
           <button type="button" className={btnCls} onClick={onClose}>Cancel</button>
           <button type="button" className={primaryCls} onClick={start} disabled={!person.trim() || !topic.trim()}>
