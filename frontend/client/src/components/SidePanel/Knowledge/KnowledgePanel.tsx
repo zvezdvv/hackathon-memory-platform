@@ -511,7 +511,7 @@ function InterviewDialog({ onClose }: { onClose: () => void }) {
     <Modal title="Start a knowledge interview" onClose={onClose}>
       <div className="flex flex-col gap-3">
         <p className="text-xs text-text-secondary">
-          Each interview is a short session of about 5–7 questions. Sessions build on each other automatically: first a typical operation step by step, then exceptions and incidents, then a check of the documents against real practice. The protocol is filed by topic under <code>interviews/&lt;topic&gt;/</code>.
+          Each interview is a short session of about 5–7 questions. Sessions build on each other automatically: first a typical operation step by step, then exceptions and incidents, then a check of the documents against real practice. All protocols are saved together under Interviews.
         </p>
         <label className="text-xs font-medium text-text-secondary">Person</label>
         <input className={inputCls} list="kb-people" placeholder="e.g. Klaus Behrens" value={person} onChange={(e) => setPerson(e.target.value)} />
@@ -967,9 +967,10 @@ export default function KnowledgePanel() {
         >
           <PanelLeft className="size-5" />
         </button>
+        <img src="assets/stadtgedaechtnis.svg" className="size-9 shrink-0" alt="" />
         <div className="mr-2">
           <h1 id="memory-overlay-title" className="text-base font-semibold text-text-primary">
-            Memory
+            Memory <span className="font-normal text-text-secondary">· Stadtgedächtnis</span>
           </h1>
           <p className="text-xs text-text-secondary">
             {docs ? `${stats.total} documents · ${stats.indexed} indexed in RAG` : 'loading …'}

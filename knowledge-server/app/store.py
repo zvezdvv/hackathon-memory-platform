@@ -1002,15 +1002,8 @@ class KnowledgeStore:
         quoted = "\n".join(f"> {ln}" if ln.strip() else ">" for ln in transcript.strip().splitlines())
         lines += [f"## {labels.get('transcript') or 'Original transcript'}", quoted, ""]
         body = frontmatter(meta) + "\n".join(lines)
-        # One topic level only: speech/<topic>/… (topic chosen by the LLM, existing folders reused)
-        topic = slugify(st.get("topic") or "") if st.get("topic") else ""
-        folder = f"speech/{topic}" if topic and topic != "untitled" else "speech"
-        return self.write_text(f"{folder}/{today()}_{slugify(title)}.md", body, document_status=document_status)
-
-    def topic_folders(self, top: str) -> list[str]:
-        """Names of the existing topic folders directly under a top-level folder."""
-        base = ROOT / top
-        return sorted(d.name for d in base.iterdir() if d.is_dir() and not d.name.startswith(".")) if base.exists() else []
+        # All voice notes sit directly in speech/ (no sub-folders); the topic is metadata.
+        return self.write_text(f"speech/{today()}_{slugify(title)}.md", body, document_status=document_status)
 
     def save_audio(self, filename: str, data: bytes) -> str:
         AUDIO_DIR.mkdir(parents=True, exist_ok=True)
@@ -1049,8 +1042,9 @@ class KnowledgeStore:
             _, body = split_frontmatter(body)
         if not body.lstrip().startswith("#"):
             body = f"# {meta['title']}\n\n{body}"
-        # Interviews are filed by topic; the person is metadata (filterable in Memory).
-        relpath = f"interviews/{slugify(topic)}/{today()}_{slugify(person)}.md"
+        # All interviews sit directly in interviews/ (no sub-folders); topic and person are
+        # metadata and filterable in Memory.
+        relpath = f"interviews/{today()}_{slugify(topic)}_{slugify(person)}.md"
         return self.write_text(relpath, frontmatter(meta) + body + "\n", document_status=document_status)
 
 

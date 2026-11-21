@@ -13,7 +13,7 @@ INSTRUCTIONS = """Smart City knowledge base (file system + RAG search).
 Folders:
 - files/                 uploaded documents (PDFs, laws, notes, data)
 - speech/                voice notes (transcripts)
-- interviews/<topic>/    knowledge interview protocols (person in the metadata)
+- interviews/            knowledge interview protocols (topic and person in the metadata)
 - _guides/               instructions on HOW to run interviews (not domain knowledge)
 
 Most source documents are written in German; answer in the user's language.
@@ -188,7 +188,7 @@ async def save_interview(
     document_status: DocumentStatus = "active",
     session: int = 0,
 ) -> str:
-    """Saves a confirmed interview protocol under interviews/<topic>/.
+    """Saves a confirmed interview protocol in interviews/.
 
     Args:
         person: Name of the interviewed person.

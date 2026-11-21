@@ -34,20 +34,18 @@ class KnowledgeOrganizeTests(unittest.TestCase):
         self.store.entries[path] = {"id": "kn_test_" + path, "status": "indexed", "mtime": 0, "size": 0}
         return path
 
-    def test_interviews_are_filed_by_topic_with_person_as_metadata(self):
+    def test_interviews_are_saved_flat_with_topic_and_person_in_the_name(self):
         path = self.store.save_interview("Klaus Behrens", "Glätte nachts", "# Protokoll\n\nText")
-        self.assertTrue(path.startswith("interviews/glaette-nachts/"))
+        self.assertRegex(path, r"^interviews/\d{4}-\d{2}-\d{2}_glaette-nachts_klaus-behrens\.md$")
         self.store.entries[path] = {"id": "kn_i", "status": "indexed", "mtime": 0, "size": 0}
         people = self.store.people()
         self.assertEqual([p["name"] for p in people], ["Klaus Behrens"])
         self.assertEqual(people[0]["sessions"], 1)
 
-    def test_voice_notes_are_filed_by_topic(self):
+    def test_voice_notes_are_saved_flat_with_topic_as_metadata(self):
         path = self.store.save_voice_note("Text", {"title": "Brücken zuerst", "topic": "Winterdienst"})
-        self.assertTrue(path.startswith("speech/winterdienst/"))
-        self.assertEqual(self.store.topic_folders("speech"), ["winterdienst"])
-        loose = self.store.save_voice_note("Text", None, title="Ohne Struktur")
-        self.assertTrue(loose.startswith("speech/2"))
+        self.assertRegex(path, r"^speech/\d{4}-\d{2}-\d{2}_bruecken-zuerst\.md$")
+        self.assertIn('topic: "Winterdienst"', (self.root / path).read_text("utf-8"))
 
     def test_next_interview_session_follows_the_three_session_plan(self):
         self.assertEqual(self.store.next_session("Klaus Behrens"), (1, "_guides/01_workday-walkthrough.md"))

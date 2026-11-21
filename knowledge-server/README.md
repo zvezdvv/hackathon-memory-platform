@@ -18,7 +18,7 @@ knowledge/  (folder = single source of truth)  ──auto──► rag_api ─�
 |---|---|
 | `knowledge/files/` | Documents (laws, PDFs, notes) – upload in the overlay or copy into the folder |
 | `knowledge/speech/` | Voice notes (transcripts) |
-| `knowledge/interviews/<topic>/` | Interview protocols, filed by topic (the person is metadata and filterable) |
+| `knowledge/interviews/` | Interview protocols, all in one folder (topic, person and session are metadata and filterable) |
 | `knowledge/_guides/` | Markdown instructions that tell the interview assistant how to ask |
 | `knowledge/.state/` | Internal index state and text cache (do not touch) |
 
@@ -58,9 +58,9 @@ docker compose up -d --force-recreate backend knowledge frontend
 
 ## Organizing
 
-Folders are created automatically, one topic level deep: interviews go to
-`interviews/<topic>/` (topic from the interview dialog) and voice notes to `speech/<topic>/`
-(topic chosen by the LLM, reusing an existing topic folder when it fits). Folders can be
+Interviews and voice notes are saved directly in `interviews/` and `speech/` – no
+sub-folders. Topic, person (and session number for interviews) are metadata and can be
+filtered in the Memory overlay. Folders can be
 deleted in the Memory overlay; there are no deeper sub-menus.
 
 ## MCP tools
