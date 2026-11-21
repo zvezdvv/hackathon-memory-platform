@@ -15,14 +15,13 @@ import hashlib
 import json
 import logging
 import os
-import re
 import time
 from pathlib import Path
 
 import httpx
 
 from . import ai
-from .store import STATE, slugify, split_frontmatter, store, view_url
+from .store import STATE, slugify, split_frontmatter, split_places, store, view_url
 
 log = logging.getLogger("knowledge")
 
@@ -53,11 +52,6 @@ Pick one category per hint:
 - info: anything else
 
 Return JSON: {"hints": [{"place": "<place name exactly as given>", "hint": "...", "category": "..."}]}"""
-
-
-def split_places(raw: str) -> list[str]:
-    names = [n.strip().strip('"').strip("'").strip() for n in re.split(r"[;,]", raw or "")]
-    return [n for n in names if n]
 
 
 def _load(path: Path) -> dict:

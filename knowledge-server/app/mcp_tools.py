@@ -61,9 +61,9 @@ def _fmt_hits(res: dict) -> str:
     lines.append(
         "Cite every result you use inline, right after the statement, as a short Markdown link, "
         "e.g. ([N01](URL)). Copy the URL completely and unchanged (including &hl=…) – it jumps "
-        "to the highlighted passage. Only if the user asks about a specific place, street, route or "
-        "\"where\": end with a map block naming just those places from \"Map places\" "
-        "(```map, the names separated by \"; \", ```). No map for general questions."
+        "to the highlighted passage. When the user asks about a specific place, street, route or "
+        "\"where\", include a map block at the end if that place is listed under \"Map places\". "
+        "Copy just the requested names (```map, names separated by \"; \", ```). No map for general questions."
     )
     return "\n".join(lines)
 

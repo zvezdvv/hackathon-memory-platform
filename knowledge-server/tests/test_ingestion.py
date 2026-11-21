@@ -92,6 +92,22 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.store._rag.return_value = httpx.Response(200, json=[[chunk, 0.52]])
         self.assertEqual((await self.store.search("deicing supply"))["results"][0]["path"], path)
 
+    async def test_natural_language_search_finds_exact_documented_place(self):
+        active, _ = await self.store.save_uploads("files", [
+            (
+                "bridge.md",
+                b'---\nplaces: ["Kennedydamm", "Innerste"]\n---\n'
+                b"# Bridge note\n\nCheck the Kennedydamm-Bruecke for ice.\n\nAn unrelated paragraph.",
+                "active",
+            ),
+            ("draft.md", b'---\nort: "Kennedydamm"\n---\nKennedydamm draft.', "draft"),
+        ])
+        query = "what should i know about Kennedydamm?"
+        results = (await self.store.search(query))["results"]
+        self.assertEqual([hit["path"] for hit in results], [active])
+        self.assertIn("Kennedydamm-Bruecke", results[0]["snippet"])
+        self.assertEqual((await self.store.search(query.replace("Kennedydamm", "Kennedy")))["results"], [])
+
     async def test_mcp_search_reranks_twelve_candidates_and_returns_six(self):
         from app import mcp_tools
 

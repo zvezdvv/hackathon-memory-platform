@@ -171,6 +171,15 @@ def split_frontmatter(text: str) -> tuple[dict, str]:
     return meta, body
 
 
+def split_places(raw: str) -> list[str]:
+    names = [part.strip().strip('"\'').strip() for part in re.split(r"[;,]", raw.strip().strip("[]"))]
+    return [name for name in names if name]
+
+
+def _search_phrase(text: str) -> str:
+    return " " + " ".join(re.findall(r"\w+", text.casefold())) + " "
+
+
 def section_items(body: str, headings: tuple[str, ...], limit: int = 8) -> list[str]:
     """Bullet points of the first Markdown section whose heading starts with one of `headings`."""
     lines = body.splitlines()
@@ -839,6 +848,7 @@ class KnowledgeStore:
         if not terms:
             return []
         min_matches = min(2, len(terms))
+        query_phrase = _search_phrase(query)
         scored = []
         for path in paths:
             try:
@@ -847,6 +857,11 @@ class KnowledgeStore:
                 continue
             meta, body = split_frontmatter(text)
             body = search_body(body)
+            matching_places = [
+                phrase
+                for name in split_places(meta.get("ort") or meta.get("places", ""))
+                if (phrase := _search_phrase(name)).strip() and phrase in query_phrase
+            ]
             # Treffer im Dateinamen/Titel/Tags zählen extra (kurze Notizen sind sonst benachteiligt)
             head = (path + " " + " ".join(meta.values())).lower()
             head_bonus = sum(3 for t in terms if t in head)
@@ -858,9 +873,11 @@ class KnowledgeStore:
                 low = para.lower()
                 score = sum(min(low.count(t), 3) for t in terms)
                 distinct = sum(1 for t in terms if t in low)
-                if distinct < min_matches:
+                paragraph_phrase = _search_phrase(para) if matching_places else ""
+                exact_place = any(phrase in paragraph_phrase for phrase in matching_places)
+                if distinct < min_matches and not exact_place:
                     continue
-                score += distinct * 2 + (5 if q in low else 0) + head_bonus
+                score += distinct * 2 + (5 if q in low else 0) + head_bonus + (5 if exact_place else 0)
                 scored.append((score, path, para))
         scored.sort(key=lambda x: -x[0])
         out, per_file = [], {}
