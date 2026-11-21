@@ -91,12 +91,19 @@ function AuthLayout({
     <div className="bg-surface-primary relative flex min-h-screen flex-col">
       <Banner />
       <BlinkAnimation active={isFetching}>
-        <div className="mt-6 h-10 w-full bg-cover">
+        {/* Stadtgedächtnis brand block: mark, wordmark and tagline (see branding/) */}
+        <div className="mt-12 flex w-full flex-col items-center gap-3 select-none">
           <img
             src="assets/logo.svg"
-            className="h-full w-full object-contain"
-            alt={localize('com_ui_logo', { 0: startupConfig?.appTitle ?? 'LibreChat' })}
+            className="size-20 drop-shadow-lg"
+            alt={localize('com_ui_logo', { 0: startupConfig?.appTitle ?? 'Stadtgedächtnis' })}
           />
+          <div className="text-text-primary text-4xl tracking-tight">
+            Stadt<span className="font-extrabold">gedächtnis</span>
+          </div>
+          <div className="text-accent-primary text-xs font-semibold tracking-[0.3em]">
+            WISSEN, DAS BLEIBT
+          </div>
         </div>
       </BlinkAnimation>
       <DisplayError />
@@ -123,6 +130,10 @@ function AuthLayout({
           {statesConsentBelowProviders && <LegalConsent startupConfig={startupConfig} />}
         </div>
       </main>
+      <div className="text-text-secondary mx-auto mb-4 flex items-center gap-2 text-xs select-none">
+        <img src="assets/smart-city-hildesheim.svg" className="size-7" alt="" />
+        Built for <span className="font-semibold">Smart City Hildesheim</span>
+      </div>
       {!statesConsent && <Footer startupConfig={startupConfig} />}
     </div>
   );

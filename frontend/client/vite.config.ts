@@ -164,11 +164,11 @@ export default defineConfig(({ command }) => ({
       },
       includeAssets: [],
       manifest: {
-        name: 'LibreChat',
-        short_name: 'LibreChat',
+        name: 'Stadtgedächtnis',
+        short_name: 'Stadtgedächtnis',
         display: 'standalone',
         background_color: '#000000',
-        theme_color: '#009688',
+        theme_color: '#0F766E',
         icons: [
           {
             src: 'assets/favicon-32x32.png',

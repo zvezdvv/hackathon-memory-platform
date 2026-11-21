@@ -37,6 +37,14 @@
   scroll-margin-top: 4rem;
 }
 
+/* Stadtgedächtnis branding: submit buttons in the brand teal instead of the default green.
+ * Overrides the semantic token (not the components), so every submit surface follows. */
+html:root,
+html.dark {
+  --surface-submit: 15 118 110;
+  --surface-submit-hover: 17 94 89;
+}
+
 /* Custom Variables */
 :root {
   --font-size-xs: 0.75rem;

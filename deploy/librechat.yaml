@@ -2,7 +2,7 @@ version: 1.3.19
 cache: true
 
 interface:
-  customWelcome: 'Welcome to the Smart City Assistant'
+  customWelcome: 'Welcome to Stadtgedächtnis'
   landingHeading: greeting
   modelSelect: true
   sidebarProjects: false
@@ -88,6 +88,7 @@ modelSpecs:
   list:
     - name: 'smart-city-assistent'
       label: 'Smart City Assistant'
+      iconURL: '/assets/stadtgedaechtnis.svg'
       description: 'Answers questions from the knowledge base – always with sources'
       default: true
       mcpServers: ['knowledge']
@@ -129,6 +130,7 @@ modelSpecs:
 
     - name: 'wissens-interview'
       label: 'Knowledge Interview'
+      iconURL: '/assets/stadtgedaechtnis.svg'
       description: 'Draws out experience-based knowledge from a person with targeted questions'
       mcpServers: ['knowledge']
       preset:

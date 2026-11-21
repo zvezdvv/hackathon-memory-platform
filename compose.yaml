@@ -41,6 +41,8 @@ services:
       DOMAIN_SERVER: https://${PUBLIC_HOST:?Set PUBLIC_HOST in .env}
       TRUST_PROXY: '1'
       NO_INDEX: 'true'
+      APP_TITLE: Stadtgedächtnis
+      CUSTOM_FOOTER: 'Stadtgedächtnis · Wissen, das bleibt · Smart City Hildesheim'
       ALLOW_EMAIL_LOGIN: 'true'
       ALLOW_REGISTRATION: 'false'
       ALLOW_SOCIAL_LOGIN: 'false'
