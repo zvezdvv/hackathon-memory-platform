@@ -553,7 +553,7 @@ class KnowledgeStore:
         return person.strip()
 
     def interview_sessions(self, person: str) -> list[dict]:
-        """Active interview sessions of a person, oldest first, with their session number."""
+        """Recorded interview sessions of a person, oldest first, with their session number."""
         slug = slugify(person)
         out = []
         for path in sorted(self.entries):

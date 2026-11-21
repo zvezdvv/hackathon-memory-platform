@@ -424,6 +424,11 @@ def _render_md(text: str) -> str:
 @app.get("/view", response_class=HTMLResponse)
 def view(path: str, hl: str = "", embed: int = 0):
     p = _guard(lambda: safe_path(path))
+    if not p.is_file() and rel(p) in {
+        "interviews/klaus-behrens/T01_uebergabe_winterdienst.md",
+        "interviews/klaus-behrens/T02_nachtrag_aenderungen.md",
+    }:
+        p = safe_path(f"interviews/{p.name}")
     if not p.is_file():
         raise HTTPException(404, "File not found")
     relative = rel(p)
@@ -431,7 +436,7 @@ def view(path: str, hl: str = "", embed: int = 0):
     progress = _pdf_progress(relative) if ext == ".pdf" else None
     status = progress["status"] if progress else store.index_status(relative, store.entries.get(relative, {}))
     status_txt = "⏳ processing PDF" if progress and status == "pending" else STATUS_LABEL.get(status, "")
-    text_content = store.get_text(path)
+    text_content = store.get_text(relative)
     meta, body = split_frontmatter(text_content) if ext in (".md", ".markdown") else ({}, text_content)
 
     audio_html = ""

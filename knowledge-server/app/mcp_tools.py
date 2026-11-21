@@ -155,7 +155,7 @@ async def person_overview(person: str) -> str:
     Returns previous interview sessions (with session numbers and topics), which session and
     guide come NEXT, and other mentions of the person.
     """
-    sessions = store.interview_sessions(person)
+    sessions = [session for session in store.interview_sessions(person) if store.is_active(session["path"])]
     number, guide = store.next_session(person)
     out = [
         f"NEXT INTERVIEW SESSION: {number} – use guide {guide} (read it with read_file).",

@@ -233,6 +233,33 @@ class KnowledgeIngestionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(docs[interview]["ort"], "Rathaus")
         self.assertEqual((await self.store.search("Rathaus"))["results"], [])
 
+    async def test_interview_overview_omits_drafts_but_advances_session(self):
+        from app import mcp_tools
+
+        path = self.store.save_interview(
+            "Klaus Behrens",
+            "Draft topic",
+            "# Draft\n\n## Offene Punkte\n- Draft detail",
+            document_status="draft",
+            session=1,
+        )
+        self.store.entries[path] = {"id": "kn_draft", "status": "pending"}
+        with patch.object(mcp_tools, "store", self.store):
+            response = await mcp_tools.person_overview("Klaus Behrens")
+        self.assertIn("NEXT INTERVIEW SESSION: 2", response)
+        self.assertNotIn("Draft topic", response)
+        self.assertNotIn("Draft detail", response)
+        self.assertNotIn(path, response)
+
+    async def test_legacy_interview_link_opens_flat_document(self):
+        from app import main
+
+        path = "interviews/T02_nachtrag_aenderungen.md"
+        self.store.write_text(path, "# Current protocol\n\nCurrent details.")
+        with patch.object(main, "store", self.store):
+            response = main.view("interviews/klaus-behrens/T02_nachtrag_aenderungen.md")
+        self.assertIn("Current details.", response.body.decode())
+
     async def test_pdf_view_tracks_processing_and_then_shows_the_transcript(self):
         from app import main
 
